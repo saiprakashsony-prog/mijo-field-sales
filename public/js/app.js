@@ -747,9 +747,23 @@ async function renderAllOrders() {
 }
 
 // ---------- Management: Masters ----------
+const MASTERS_SECTIONS = [
+  ['territories', 'Territories'],
+  ['mandals', 'Mandals'],
+  ['distributors', 'Distributors'],
+  ['employees', 'Field Employees'],
+  ['products', 'Products'],
+  ['logins', 'Logins'],
+];
+
 async function renderMasters() {
+  if (!state.mastersSubTab) state.mastersSubTab = 'territories';
   const wrap = el(`
     <div>
+      <nav class="tabs" style="background:var(--bg);border-radius:8px;margin-bottom:12px;padding:4px">
+        ${MASTERS_SECTIONS.map(([id, label]) => `<button data-section-btn="${id}" style="color:${id === state.mastersSubTab ? 'var(--brand)' : 'var(--muted)'};border-bottom-color:${id === state.mastersSubTab ? 'var(--brand)' : 'transparent'}">${label}</button>`).join('')}
+      </nav>
+      <div class="master-section" data-section="territories">
       <div class="card">
         <p class="section-title">Territories</p>
         <div class="grid cols-2">
@@ -766,6 +780,8 @@ async function renderMasters() {
         <button class="btn small" id="addTerritory">Add Territory</button>
         <div id="territoryList" style="margin-top:10px"></div>
       </div>
+      </div>
+      <div class="master-section" data-section="mandals">
       <div class="card">
         <p class="section-title">Mandals</p>
         <p class="muted">Mandals aren't a fixed nationwide list, so add them yourself per district as you expand — they're what a distributor's coverage gets mapped to.</p>
@@ -785,6 +801,8 @@ async function renderMasters() {
         <button class="btn small secondary" id="toggleMandalList">Show Mandal List</button>
         <div id="mandalList" style="margin-top:10px;display:none"></div>
       </div>
+      </div>
+      <div class="master-section" data-section="distributors">
       <div class="card">
         <p class="section-title">Distributors</p>
         <div class="grid cols-3">
@@ -808,6 +826,8 @@ async function renderMasters() {
         <button class="btn small" id="addDistributor">Add Distributor</button>
         <div id="distributorList" style="margin-top:10px"></div>
       </div>
+      </div>
+      <div class="master-section" data-section="employees">
       <div class="card">
         <p class="section-title">Field Employees</p>
         <div class="grid cols-3">
@@ -820,6 +840,8 @@ async function renderMasters() {
         <div id="editEmployeeBox"></div>
         <div id="employeeList" style="margin-top:10px"></div>
       </div>
+      </div>
+      <div class="master-section" data-section="products">
       <div class="card">
         <p class="section-title">Categories</p>
         <div class="grid cols-3">
@@ -846,6 +868,8 @@ async function renderMasters() {
         <div id="editProductBox"></div>
         <div id="productList" style="margin-top:10px"></div>
       </div>
+      </div>
+      <div class="master-section" data-section="logins">
       <div class="card">
         <p class="section-title">Create Login</p>
         <p class="muted">Give an employee or distributor their own sign-in. Field staff use "Field Employee" and pick the matching Employee record; a distributor's warehouse/office staff use "Distributor" and pick their Distributor record.</p>
@@ -871,7 +895,22 @@ async function renderMasters() {
         <div class="error-msg" id="ulErr"></div>
         <div id="loginList" style="margin-top:10px"></div>
       </div>
+      </div>
     </div>`);
+
+  function showMastersSection(id) {
+    state.mastersSubTab = id;
+    wrap.querySelectorAll('.master-section').forEach((s) => { s.style.display = s.dataset.section === id ? 'block' : 'none'; });
+    wrap.querySelectorAll('[data-section-btn]').forEach((b) => {
+      const active = b.dataset.sectionBtn === id;
+      b.style.color = active ? 'var(--brand)' : 'var(--muted)';
+      b.style.borderBottomColor = active ? 'var(--brand)' : 'transparent';
+    });
+  }
+  wrap.querySelectorAll('[data-section-btn]').forEach((btn) => {
+    btn.onclick = () => showMastersSection(btn.dataset.sectionBtn);
+  });
+  showMastersSection(state.mastersSubTab);
 
   let territoriesCache = [];
   async function loadTerritories() {
