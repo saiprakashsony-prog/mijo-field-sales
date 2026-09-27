@@ -6,6 +6,7 @@ const router = express.Router();
 router.use(authRequired);
 
 const DUP_RADIUS_METERS = 100; // configurable proximity radius, BRD 6
+const GEOFENCE_RADIUS_METERS = 100; // a field employee must be physically within this of the pin they're saving (BRD 14, 19)
 
 function genCode() {
   return 'RTL' + Date.now().toString().slice(-8);
@@ -76,6 +77,7 @@ router.post('/', async (req, res) => {
   const {
     name, owner_name, mobile, address, pincode, territory_id,
     gstin, pan, shop_type, photo_url, gps_lat, gps_lng, distributor_id,
+    device_lat, device_lng,
   } = req.body;
 
   if (!name || !mobile || !address || !shop_type) {
@@ -91,6 +93,19 @@ router.post('/', async (req, res) => {
   const employeeId = req.user.employee_id;
   if (req.user.role === 'field_employee' && !employeeId) {
     return res.status(400).json({ error: 'Logged-in user has no linked employee record' });
+  }
+
+  // Geofence: a field employee must be physically near the pin they're saving, so a
+  // retailer can't be created from far away. Only enforced for field_employee logins —
+  // admin/management users entering data from the office are not restricted by this.
+  if (req.user.role === 'field_employee') {
+    if (device_lat == null || device_lng == null) {
+      return res.status(400).json({ error: 'Could not verify your current location. Please enable location access and try again.' });
+    }
+    const distFromDevice = distanceMeters(Number(gps_lat), Number(gps_lng), Number(device_lat), Number(device_lng));
+    if (distFromDevice > GEOFENCE_RADIUS_METERS) {
+      return res.status(400).json({ error: `The selected location is ${Math.round(distFromDevice)}m from your current position — it must be within ${GEOFENCE_RADIUS_METERS}m. Move closer to the shop or adjust the pin.` });
+    }
   }
 
   const code = genCode();
