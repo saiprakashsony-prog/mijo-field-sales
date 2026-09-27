@@ -20,13 +20,15 @@ body {
 header.topbar {
   background: var(--brand);
   color: white;
-  padding: 14px 20px;
+  padding: 12px 20px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
 }
-header.topbar h1 { font-size: 17px; margin: 0; font-weight: 600; }
-header.topbar .who { font-size: 13px; opacity: .9; }
+header.topbar h1 { font-size: 16px; margin: 0; font-weight: 600; }
+header.topbar .who { font-size: 12px; opacity: .9; white-space: nowrap; }
 nav.tabs {
   display: flex;
   gap: 4px;
@@ -38,27 +40,39 @@ nav.tabs button {
   background: transparent;
   border: none;
   color: rgba(255,255,255,.75);
-  padding: 10px 14px;
+  padding: 9px 14px;
   font-size: 13px;
   cursor: pointer;
   border-bottom: 3px solid transparent;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 nav.tabs button.active { color: white; border-bottom-color: white; font-weight: 600; }
-main { padding: 18px; max-width: 1200px; margin: 0 auto; }
+main { padding: 14px; max-width: 1200px; margin: 0 auto; }
 .card {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 16px;
-  margin-bottom: 16px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  overflow-x: auto; /* wide tables/forms scroll inside the card instead of breaking page width */
 }
-.grid { display: grid; gap: 12px; }
+.grid { display: grid; gap: 10px; }
 .grid.cols-2 { grid-template-columns: 1fr 1fr; }
 .grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
 .grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
 @media (max-width: 720px) {
-  .grid.cols-2, .grid.cols-3, .grid.cols-4 { grid-template-columns: 1fr; }
+  header.topbar { padding: 10px 14px; }
+  header.topbar h1 { width: 100%; }
+  main { padding: 8px; }
+  .card { padding: 10px 12px; margin-bottom: 10px; border-radius: 8px; }
+  .grid.cols-2, .grid.cols-3 { grid-template-columns: 1fr; }
+  .grid.cols-4 { grid-template-columns: 1fr 1fr; gap: 8px; } /* keep KPI cards 2-up instead of a long single column */
+  .chart-box { height: 180px !important; } /* overrides the inline heights set per-chart in app.js */
+  table { font-size: 12px; }
+  th, td { padding: 6px 7px; }
+  .kpi .value { font-size: 19px; }
+  .section-title { font-size: 13px; }
 }
 label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 input, select, textarea {
@@ -84,18 +98,18 @@ button.btn:hover { background: var(--brand-dark); }
 button.btn.secondary { background: white; color: var(--brand); border: 1px solid var(--brand); }
 button.btn.small { padding: 5px 10px; font-size: 12px; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
-th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
-.kpi { text-align: center; }
-.kpi .value { font-size: 26px; font-weight: 700; color: var(--brand); }
-.kpi .label { font-size: 12px; color: var(--muted); margin-top: 4px; }
+th, td { text-align: left; padding: 6px 9px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; }
+.kpi { text-align: center; padding: 4px 0; }
+.kpi .value { font-size: 22px; font-weight: 700; color: var(--brand); }
+.kpi .label { font-size: 11px; color: var(--muted); margin-top: 2px; }
 .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; }
 .badge.submitted { background: #fef3c7; color: var(--warn); }
 .badge.accepted, .badge.picking, .badge.packing, .badge.ready_for_dispatch { background: #dbeafe; color: #1d4ed8; }
 .badge.dispatched { background: #e0e7ff; color: #4338ca; }
 .badge.delivered { background: #dcfce7; color: var(--ok); }
 .badge.cancelled { background: #fee2e2; color: var(--danger); }
-.section-title { font-size: 15px; font-weight: 600; margin: 0 0 12px; }
+.section-title { font-size: 14px; font-weight: 600; margin: 0 0 10px; }
 .muted { color: var(--muted); font-size: 13px; }
 .login-wrap { display: flex; align-items: center; justify-content: center; min-height: 90vh; }
 .login-box { width: 340px; }

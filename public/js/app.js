@@ -615,13 +615,13 @@ async function renderDashboard() {
       <div class="grid cols-2">
         <div class="card">
           <p class="section-title">Orders by Distributor</p>
-          <div class="chart-box" style="height:220px"><canvas id="chartByDistributor"></canvas></div>
+          <div class="chart-box" style="height:180px"><canvas id="chartByDistributor"></canvas></div>
           <table><thead><tr><th>Distributor</th><th>Orders</th><th>Value</th></tr></thead>
           <tbody>${d.byDistributor.map((r) => `<tr><td>${r.name}</td><td>${r.order_count}</td><td>${fmtMoney(r.order_value)}</td></tr>`).join('')}</tbody></table>
         </div>
         <div class="card">
           <p class="section-title">Orders by Sales Employee</p>
-          <div class="chart-box" style="height:220px"><canvas id="chartByEmployee"></canvas></div>
+          <div class="chart-box" style="height:180px"><canvas id="chartByEmployee"></canvas></div>
           <table><thead><tr><th>Employee</th><th>Orders</th><th>Value</th></tr></thead>
           <tbody>${d.byEmployee.map((r) => `<tr><td>${r.name}</td><td>${r.order_count}</td><td>${fmtMoney(r.order_value)}</td></tr>`).join('')}</tbody></table>
         </div>
@@ -629,13 +629,13 @@ async function renderDashboard() {
       <div class="grid cols-2">
         <div class="card">
           <p class="section-title">Top SKUs Today</p>
-          <div class="chart-box" style="height:220px"><canvas id="chartTopSkus"></canvas></div>
+          <div class="chart-box" style="height:180px"><canvas id="chartTopSkus"></canvas></div>
           <table><thead><tr><th>SKU</th><th>Qty</th><th>Value</th></tr></thead>
           <tbody>${d.topSkus.map((r) => `<tr><td>${r.name} (${r.sku_code})</td><td>${r.qty}</td><td>${fmtMoney(r.value)}</td></tr>`).join('')}</tbody></table>
         </div>
         <div class="card">
           <p class="section-title">Orders by Status</p>
-          <div class="chart-box" style="height:220px"><canvas id="chartByStatus"></canvas></div>
+          <div class="chart-box" style="height:180px"><canvas id="chartByStatus"></canvas></div>
           <table><thead><tr><th>Status</th><th>Count</th><th>Value</th></tr></thead>
           <tbody>${d.byStatus.map((r) => `<tr><td><span class="badge ${r.status}">${r.status.replace(/_/g, ' ')}</span></td><td>${r.cnt}</td><td>${fmtMoney(r.value)}</td></tr>`).join('')}</tbody></table>
         </div>
@@ -654,30 +654,30 @@ async function renderDashboard() {
       <div class="grid cols-2">
         <div class="card">
           <p class="section-title">Fast Moving SKUs (by quantity)</p>
-          <div class="chart-box" style="height:320px"><canvas id="chartFastSkus"></canvas></div>
+          <div class="chart-box" style="height:260px"><canvas id="chartFastSkus"></canvas></div>
           <div id="perfFastSkus"></div>
         </div>
         <div class="card">
           <p class="section-title">Best Performing Territories</p>
-          <div class="chart-box" style="height:320px"><canvas id="chartTerritories"></canvas></div>
+          <div class="chart-box" style="height:260px"><canvas id="chartTerritories"></canvas></div>
           <div id="perfTerritories"></div>
         </div>
       </div>
       <div class="grid cols-2">
         <div class="card">
           <p class="section-title">Top Sales Employees</p>
-          <div class="chart-box" style="height:320px"><canvas id="chartEmployees"></canvas></div>
+          <div class="chart-box" style="height:260px"><canvas id="chartEmployees"></canvas></div>
           <div id="perfEmployees"></div>
         </div>
         <div class="card">
           <p class="section-title">Top Distributors</p>
-          <div class="chart-box" style="height:320px"><canvas id="chartDistributors"></canvas></div>
+          <div class="chart-box" style="height:260px"><canvas id="chartDistributors"></canvas></div>
           <div id="perfDistributors"></div>
         </div>
       </div>
       <div class="card">
         <p class="section-title">Discount / Scheme Performance</p>
-        <div class="chart-box" style="height:260px"><canvas id="chartScheme"></canvas></div>
+        <div class="chart-box" style="height:200px"><canvas id="chartScheme"></canvas></div>
         <div id="perfScheme"></div>
       </div>
     </div>`);
