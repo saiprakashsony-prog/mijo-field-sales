@@ -25,6 +25,58 @@ function fmtMoney(n) { return '₹' + Number(n || 0).toLocaleString('en-IN', { m
 function fmtDate(d) { return d ? new Date(d).toLocaleString('en-IN') : ''; }
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 
+// ---------- Chart helper (Chart.js) ----------
+const CHART_PALETTE = ['#d84315', '#f57c34', '#1b8a5a', '#1d4ed8', '#7c3aed', '#b45309', '#4338ca', '#0891b2', '#be123c', '#65a30d'];
+const chartRegistry = {}; // canvasId -> Chart instance, so repeated re-renders (e.g. period change) don't leak
+function drawBarChart(canvasEl, labels, values, opts = {}) {
+  if (!canvasEl || !window.Chart) return;
+  const id = canvasEl.id;
+  if (chartRegistry[id]) { chartRegistry[id].destroy(); delete chartRegistry[id]; }
+  if (!labels.length) return;
+  const horizontal = opts.horizontal !== false;
+  chartRegistry[id] = new Chart(canvasEl.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: opts.label || '',
+        data: values,
+        backgroundColor: opts.colorful ? labels.map((_, i) => CHART_PALETTE[i % CHART_PALETTE.length]) : (opts.color || '#d84315'),
+        borderRadius: 4,
+        maxBarThickness: 34,
+      }],
+    },
+    options: {
+      indexAxis: horizontal ? 'y' : 'x',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: opts.tooltipFormatter ? { label: (ctx) => opts.tooltipFormatter(ctx.raw) } : undefined },
+      },
+      scales: {
+        x: { beginAtZero: true, ticks: opts.xFormatter ? { callback: opts.xFormatter } : undefined, grid: { display: !horizontal } },
+        y: { grid: { display: horizontal } },
+      },
+    },
+  });
+}
+function drawDoughnutChart(canvasEl, labels, values, opts = {}) {
+  if (!canvasEl || !window.Chart) return;
+  const id = canvasEl.id;
+  if (chartRegistry[id]) { chartRegistry[id].destroy(); delete chartRegistry[id]; }
+  if (!labels.length) return;
+  chartRegistry[id] = new Chart(canvasEl.getContext('2d'), {
+    type: 'doughnut',
+    data: { labels, datasets: [{ data: values, backgroundColor: labels.map((_, i) => CHART_PALETTE[i % CHART_PALETTE.length]) }] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } } },
+    },
+  });
+}
+
 // ---------- Root render ----------
 function render() {
   const app = document.getElementById('app');
@@ -516,24 +568,30 @@ async function renderDashboard() {
       <div class="grid cols-2">
         <div class="card">
           <p class="section-title">Orders by Distributor</p>
+          <div class="chart-box" style="height:220px"><canvas id="chartByDistributor"></canvas></div>
           <table><thead><tr><th>Distributor</th><th>Orders</th><th>Value</th></tr></thead>
           <tbody>${d.byDistributor.map((r) => `<tr><td>${r.name}</td><td>${r.order_count}</td><td>${fmtMoney(r.order_value)}</td></tr>`).join('')}</tbody></table>
         </div>
         <div class="card">
           <p class="section-title">Orders by Sales Employee</p>
+          <div class="chart-box" style="height:220px"><canvas id="chartByEmployee"></canvas></div>
           <table><thead><tr><th>Employee</th><th>Orders</th><th>Value</th></tr></thead>
           <tbody>${d.byEmployee.map((r) => `<tr><td>${r.name}</td><td>${r.order_count}</td><td>${fmtMoney(r.order_value)}</td></tr>`).join('')}</tbody></table>
         </div>
       </div>
-      <div class="card">
-        <p class="section-title">Top SKUs Today</p>
-        <table><thead><tr><th>SKU</th><th>Qty</th><th>Value</th></tr></thead>
-        <tbody>${d.topSkus.map((r) => `<tr><td>${r.name} (${r.sku_code})</td><td>${r.qty}</td><td>${fmtMoney(r.value)}</td></tr>`).join('')}</tbody></table>
-      </div>
-      <div class="card">
-        <p class="section-title">Orders by Status</p>
-        <table><thead><tr><th>Status</th><th>Count</th><th>Value</th></tr></thead>
-        <tbody>${d.byStatus.map((r) => `<tr><td><span class="badge ${r.status}">${r.status.replace(/_/g, ' ')}</span></td><td>${r.cnt}</td><td>${fmtMoney(r.value)}</td></tr>`).join('')}</tbody></table>
+      <div class="grid cols-2">
+        <div class="card">
+          <p class="section-title">Top SKUs Today</p>
+          <div class="chart-box" style="height:220px"><canvas id="chartTopSkus"></canvas></div>
+          <table><thead><tr><th>SKU</th><th>Qty</th><th>Value</th></tr></thead>
+          <tbody>${d.topSkus.map((r) => `<tr><td>${r.name} (${r.sku_code})</td><td>${r.qty}</td><td>${fmtMoney(r.value)}</td></tr>`).join('')}</tbody></table>
+        </div>
+        <div class="card">
+          <p class="section-title">Orders by Status</p>
+          <div class="chart-box" style="height:220px"><canvas id="chartByStatus"></canvas></div>
+          <table><thead><tr><th>Status</th><th>Count</th><th>Value</th></tr></thead>
+          <tbody>${d.byStatus.map((r) => `<tr><td><span class="badge ${r.status}">${r.status.replace(/_/g, ' ')}</span></td><td>${r.cnt}</td><td>${fmtMoney(r.value)}</td></tr>`).join('')}</tbody></table>
+        </div>
       </div>
 
       <div class="card">
@@ -549,28 +607,39 @@ async function renderDashboard() {
       <div class="grid cols-2">
         <div class="card">
           <p class="section-title">Fast Moving SKUs (by quantity)</p>
+          <div class="chart-box" style="height:320px"><canvas id="chartFastSkus"></canvas></div>
           <div id="perfFastSkus"></div>
         </div>
         <div class="card">
           <p class="section-title">Best Performing Territories</p>
+          <div class="chart-box" style="height:320px"><canvas id="chartTerritories"></canvas></div>
           <div id="perfTerritories"></div>
         </div>
       </div>
       <div class="grid cols-2">
         <div class="card">
           <p class="section-title">Top Sales Employees</p>
+          <div class="chart-box" style="height:320px"><canvas id="chartEmployees"></canvas></div>
           <div id="perfEmployees"></div>
         </div>
         <div class="card">
           <p class="section-title">Top Distributors</p>
+          <div class="chart-box" style="height:320px"><canvas id="chartDistributors"></canvas></div>
           <div id="perfDistributors"></div>
         </div>
       </div>
       <div class="card">
         <p class="section-title">Discount / Scheme Performance</p>
+        <div class="chart-box" style="height:260px"><canvas id="chartScheme"></canvas></div>
         <div id="perfScheme"></div>
       </div>
     </div>`);
+
+  // "Today" charts render once, from the initial summary fetch above
+  drawBarChart(wrap.querySelector('#chartByDistributor'), d.byDistributor.map((r) => r.name), d.byDistributor.map((r) => Number(r.order_value)), { label: 'Order value', tooltipFormatter: fmtMoney, colorful: true });
+  drawBarChart(wrap.querySelector('#chartByEmployee'), d.byEmployee.map((r) => r.name), d.byEmployee.map((r) => Number(r.order_value)), { label: 'Order value', tooltipFormatter: fmtMoney, colorful: true });
+  drawBarChart(wrap.querySelector('#chartTopSkus'), d.topSkus.map((r) => r.name), d.topSkus.map((r) => Number(r.qty)), { label: 'Qty', color: '#1d4ed8' });
+  drawDoughnutChart(wrap.querySelector('#chartByStatus'), d.byStatus.map((r) => r.status.replace(/_/g, ' ')), d.byStatus.map((r) => Number(r.cnt)));
 
   async function loadPerformance(days) {
     const p = await api(`/dashboard/performance?days=${days}`);
@@ -580,23 +649,28 @@ async function renderDashboard() {
       ? `<table><thead><tr><th>SKU</th><th>Category</th><th>Qty Sold</th><th>Value</th><th>Orders</th></tr></thead>
          <tbody>${p.fastMovingSkus.map((r) => `<tr><td>${r.name} (${r.sku_code})</td><td>${r.category || ''}</td><td>${r.total_qty}</td><td>${fmtMoney(r.total_value)}</td><td>${r.order_count}</td></tr>`).join('')}</tbody></table>`
       : '<p class="muted">No orders in this period yet.</p>';
+    drawBarChart(wrap.querySelector('#chartFastSkus'), p.fastMovingSkus.map((r) => r.name), p.fastMovingSkus.map((r) => Number(r.total_qty)), { label: 'Qty sold', color: '#1b8a5a' });
 
     wrap.querySelector('#perfTerritories').innerHTML = p.byTerritory.length
       ? `<table><thead><tr><th>Territory</th><th>Orders</th><th>Retailers</th><th>Value</th></tr></thead>
          <tbody>${p.byTerritory.map((r) => `<tr><td>${r.name}</td><td>${r.order_count}</td><td>${r.retailer_count}</td><td>${fmtMoney(r.order_value)}</td></tr>`).join('')}</tbody></table>`
       : '<p class="muted">No territories yet.</p>';
+    drawBarChart(wrap.querySelector('#chartTerritories'), p.byTerritory.map((r) => r.name), p.byTerritory.map((r) => Number(r.order_value)), { label: 'Order value', tooltipFormatter: fmtMoney, colorful: true });
 
     wrap.querySelector('#perfEmployees').innerHTML = p.topEmployees.length
       ? `<table><thead><tr><th>Employee</th><th>Orders</th><th>Retailers</th><th>Value</th></tr></thead>
          <tbody>${p.topEmployees.map((r) => `<tr><td>${r.name} (${r.code})</td><td>${r.order_count}</td><td>${r.retailer_count}</td><td>${fmtMoney(r.order_value)}</td></tr>`).join('')}</tbody></table>`
       : '<p class="muted">No employees yet.</p>';
+    drawBarChart(wrap.querySelector('#chartEmployees'), p.topEmployees.map((r) => r.name), p.topEmployees.map((r) => Number(r.order_value)), { label: 'Order value', tooltipFormatter: fmtMoney, colorful: true });
 
     wrap.querySelector('#perfDistributors').innerHTML = p.topDistributors.length
       ? `<table><thead><tr><th>Distributor</th><th>Orders</th><th>Value</th></tr></thead>
          <tbody>${p.topDistributors.map((r) => `<tr><td>${r.name} (${r.code})</td><td>${r.order_count}</td><td>${fmtMoney(r.order_value)}</td></tr>`).join('')}</tbody></table>`
       : '<p class="muted">No distributors yet.</p>';
+    drawBarChart(wrap.querySelector('#chartDistributors'), p.topDistributors.map((r) => r.name), p.topDistributors.map((r) => Number(r.order_value)), { label: 'Order value', tooltipFormatter: fmtMoney, colorful: true });
 
     const s = p.schemePerformance;
+    drawBarChart(wrap.querySelector('#chartScheme'), s.bySku.map((r) => r.name), s.bySku.map((r) => Number(r.total_discount)), { label: 'Discount given', tooltipFormatter: fmtMoney, color: '#b45309' });
     wrap.querySelector('#perfScheme').innerHTML = `
       <div class="grid cols-3" style="margin-bottom:12px">
         <div class="kpi"><div class="value">${fmtMoney(s.total_discount)}</div><div class="label">Total Discount Given</div></div>
