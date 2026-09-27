@@ -461,11 +461,20 @@ async function renderMasters() {
         <div id="employeeList" style="margin-top:10px"></div>
       </div>
       <div class="card">
+        <p class="section-title">Categories</p>
+        <div class="grid cols-3">
+          <div class="field"><label>Category Name</label><input id="mcName" /></div>
+        </div>
+        <button class="btn small" id="addCategory">Add Category</button>
+        <div id="categoryList" style="margin-top:10px"></div>
+      </div>
+      <div class="card">
         <p class="section-title">Product / SKU Master</p>
         <p class="muted">All prices are GST-inclusive. Retailer Price = MRP marked down by Retailer Margin %. Distributor Price = Retailer Price marked down by Distributor Margin % (informational, used for your own costing reference).</p>
         <div class="grid cols-4">
           <div class="field"><label>SKU Code</label><input id="mpCode" /></div>
           <div class="field"><label>Name</label><input id="mpName" /></div>
+          <div class="field"><label>Category</label><select id="mpCategory"><option value="">-- none --</option></select></div>
           <div class="field"><label>Pack Size</label><input id="mpPack" /></div>
           <div class="field"><label>MRP (incl. GST)</label><input id="mpMrp" type="number" /></div>
           <div class="field"><label>Retailer Margin %</label><input id="mpRetailerMargin" type="number" step="0.01" /></div>
@@ -473,6 +482,7 @@ async function renderMasters() {
           <div class="field"><label>GST % (for invoice display only)</label><input id="mpGst" type="number" value="5" /></div>
         </div>
         <button class="btn small" id="addProduct">Add Product</button>
+        <div id="editProductBox"></div>
         <div id="productList" style="margin-top:10px"></div>
       </div>
       <div class="card">
@@ -537,9 +547,122 @@ async function renderMasters() {
     const rows = await api('/employees');
     wrap.querySelector('#employeeList').innerHTML = `<table><thead><tr><th>Code</th><th>Name</th><th>Mobile</th><th>Distributors</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${r.code}</td><td>${r.name}</td><td>${r.mobile}</td><td>${r.distributors || ''}</td></tr>`).join('')}</tbody></table>`;
   }
+  async function loadCategories() {
+    const rows = await api('/categories');
+    const box = wrap.querySelector('#categoryList');
+    box.innerHTML = `<table><thead><tr><th>Name</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr data-id="${r.id}"><td>${r.name}</td><td>
+      <button class="btn small secondary renameCatBtn">Rename</button>
+      <button class="btn small secondary delCatBtn">Delete</button>
+    </td></tr>`).join('')}</tbody></table>`;
+    box.querySelectorAll('.renameCatBtn').forEach((btn) => {
+      btn.onclick = async () => {
+        const tr = btn.closest('tr');
+        const current = tr.querySelector('td').textContent;
+        const next = prompt('Rename category to:', current);
+        if (!next || next.trim() === current) return;
+        try {
+          await api(`/categories/${tr.dataset.id}`, { method: 'PATCH', body: JSON.stringify({ name: next.trim() }) });
+          loadCategories();
+        } catch (e) { alert(e.message); }
+      };
+    });
+    box.querySelectorAll('.delCatBtn').forEach((btn) => {
+      btn.onclick = async () => {
+        if (!confirm('Delete this category? Existing products keep their current category text either way.')) return;
+        await api(`/categories/${btn.closest('tr').dataset.id}`, { method: 'DELETE' });
+        loadCategories();
+      };
+    });
+    wrap.querySelector('#mpCategory').innerHTML = '<option value="">-- none --</option>' + rows.map((r) => `<option value="${r.name}">${r.name}</option>`).join('');
+    return rows;
+  }
+
+  function productFormValues() {
+    return {
+      sku_code: wrap.querySelector('#mpCode').value,
+      name: wrap.querySelector('#mpName').value,
+      category: wrap.querySelector('#mpCategory').value || null,
+      pack_size: wrap.querySelector('#mpPack').value,
+      mrp: wrap.querySelector('#mpMrp').value,
+      retailer_margin_pct: wrap.querySelector('#mpRetailerMargin').value,
+      distributor_margin_pct: wrap.querySelector('#mpDistMargin').value,
+      gst_pct: wrap.querySelector('#mpGst').value,
+    };
+  }
+  function clearProductForm() {
+    wrap.querySelector('#mpCode').value = '';
+    wrap.querySelector('#mpName').value = '';
+    wrap.querySelector('#mpCategory').value = '';
+    wrap.querySelector('#mpPack').value = '';
+    wrap.querySelector('#mpMrp').value = '';
+    wrap.querySelector('#mpRetailerMargin').value = '';
+    wrap.querySelector('#mpDistMargin').value = '';
+    wrap.querySelector('#mpGst').value = '5';
+  }
+
   async function loadProducts() {
     const rows = await api('/products');
-    wrap.querySelector('#productList').innerHTML = `<table><thead><tr><th>SKU</th><th>Name</th><th>MRP</th><th>Retailer Price</th><th>Distributor Price</th><th>GST%</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${r.sku_code}</td><td>${r.name}</td><td>${fmtMoney(r.mrp)}</td><td>${fmtMoney(r.retailer_price)}</td><td>${fmtMoney(r.distributor_price)}</td><td>${r.gst_pct}</td></tr>`).join('')}</tbody></table>`;
+    const box = wrap.querySelector('#productList');
+    box.innerHTML = `<table><thead><tr><th>SKU</th><th>Name</th><th>Category</th><th>MRP</th><th>Retailer Price</th><th>Distributor Price</th><th>GST%</th><th></th></tr></thead>
+      <tbody>${rows.map((r) => `<tr data-id="${r.id}">
+        <td>${r.sku_code}</td><td>${r.name}</td><td>${r.category || ''}</td><td>${fmtMoney(r.mrp)}</td><td>${fmtMoney(r.retailer_price)}</td><td>${fmtMoney(r.distributor_price)}</td><td>${r.gst_pct}</td>
+        <td><button class="btn small secondary editProductBtn">Edit</button> <button class="btn small secondary delProductBtn">Delete</button></td>
+      </tr>`).join('')}</tbody></table>`;
+
+    box.querySelectorAll('.delProductBtn').forEach((btn) => {
+      btn.onclick = async () => {
+        if (!confirm('Delete this product?')) return;
+        try {
+          await api(`/products/${btn.closest('tr').dataset.id}`, { method: 'DELETE' });
+          loadProducts();
+        } catch (e) { alert(e.message); }
+      };
+    });
+    box.querySelectorAll('.editProductBtn').forEach((btn) => {
+      btn.onclick = () => {
+        const id = btn.closest('tr').dataset.id;
+        const p = rows.find((r) => String(r.id) === id);
+        openProductEditor(p);
+      };
+    });
+  }
+
+  function openProductEditor(p) {
+    const editBox = wrap.querySelector('#editProductBox');
+    editBox.innerHTML = `
+      <div class="card" style="border-color:var(--brand)">
+        <p class="section-title">Edit Product — ${p.sku_code}</p>
+        <div class="grid cols-4">
+          <div class="field"><label>Name</label><input id="epName" value="${p.name}" /></div>
+          <div class="field"><label>Category</label><select id="epCategory">${wrap.querySelector('#mpCategory').innerHTML}</select></div>
+          <div class="field"><label>Pack Size</label><input id="epPack" value="${p.pack_size || ''}" /></div>
+          <div class="field"><label>MRP (incl. GST)</label><input id="epMrp" type="number" value="${p.mrp}" /></div>
+          <div class="field"><label>Retailer Margin %</label><input id="epRetailerMargin" type="number" step="0.01" value="${p.retailer_margin_pct}" /></div>
+          <div class="field"><label>Distributor Margin %</label><input id="epDistMargin" type="number" step="0.01" value="${p.distributor_margin_pct}" /></div>
+          <div class="field"><label>GST %</label><input id="epGst" type="number" value="${p.gst_pct}" /></div>
+          <div class="field"><label>Status</label>
+            <select id="epStatus"><option value="active" ${p.status === 'active' ? 'selected' : ''}>Active</option><option value="inactive" ${p.status === 'inactive' ? 'selected' : ''}>Inactive</option></select>
+          </div>
+        </div>
+        <button class="btn small" id="epSave">Save</button>
+        <button class="btn small secondary" id="epCancel">Cancel</button>
+      </div>`;
+    editBox.querySelector('#epCategory').value = p.category || '';
+    editBox.querySelector('#epCancel').onclick = () => { editBox.innerHTML = ''; };
+    editBox.querySelector('#epSave').onclick = async () => {
+      await api(`/products/${p.id}`, { method: 'PATCH', body: JSON.stringify({
+        name: editBox.querySelector('#epName').value,
+        category: editBox.querySelector('#epCategory').value || null,
+        pack_size: editBox.querySelector('#epPack').value,
+        mrp: editBox.querySelector('#epMrp').value,
+        retailer_margin_pct: editBox.querySelector('#epRetailerMargin').value,
+        distributor_margin_pct: editBox.querySelector('#epDistMargin').value,
+        gst_pct: editBox.querySelector('#epGst').value,
+        status: editBox.querySelector('#epStatus').value,
+      }) });
+      editBox.innerHTML = '';
+      loadProducts();
+    };
   }
 
   wrap.querySelector('#mtState').onchange = (e) => {
@@ -562,15 +685,22 @@ async function renderMasters() {
     await api('/employees', { method: 'POST', body: JSON.stringify({ name: wrap.querySelector('#meName').value, mobile: wrap.querySelector('#meMobile').value, designation: wrap.querySelector('#meDesignation').value, distributor_ids: distId ? [distId] : [] }) });
     loadEmployees();
   };
+  wrap.querySelector('#addCategory').onclick = async () => {
+    const name = wrap.querySelector('#mcName').value.trim();
+    if (!name) return;
+    try {
+      await api('/categories', { method: 'POST', body: JSON.stringify({ name }) });
+      wrap.querySelector('#mcName').value = '';
+      loadCategories();
+    } catch (e) { alert(e.message); }
+  };
+
   wrap.querySelector('#addProduct').onclick = async () => {
-    await api('/products', { method: 'POST', body: JSON.stringify({
-      sku_code: wrap.querySelector('#mpCode').value, name: wrap.querySelector('#mpName').value, pack_size: wrap.querySelector('#mpPack').value,
-      mrp: wrap.querySelector('#mpMrp').value,
-      retailer_margin_pct: wrap.querySelector('#mpRetailerMargin').value,
-      distributor_margin_pct: wrap.querySelector('#mpDistMargin').value,
-      gst_pct: wrap.querySelector('#mpGst').value,
-    }) });
-    loadProducts();
+    try {
+      await api('/products', { method: 'POST', body: JSON.stringify(productFormValues()) });
+      clearProductForm();
+      loadProducts();
+    } catch (e) { alert(e.message); }
   };
 
   async function loadLogins() {
@@ -619,6 +749,7 @@ async function renderMasters() {
   await loadTerritories();
   await loadDistributors();
   await loadEmployees();
+  await loadCategories();
   await loadProducts();
   await loadEmployeeOptions();
   await loadDistributorOptions();

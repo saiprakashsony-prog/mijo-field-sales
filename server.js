@@ -13,6 +13,7 @@ app.use('/api/employees', require('./routes/employees'));
 app.use('/api/distributors', require('./routes/distributors'));
 app.use('/api/territories', require('./routes/territories'));
 app.use('/api/products', require('./routes/products'));
+app.use('/api/categories', require('./routes/categories'));
 app.use('/api/retailers', require('./routes/retailers'));
 app.use('/api/visits', require('./routes/visits'));
 app.use('/api/orders', require('./routes/orders'));

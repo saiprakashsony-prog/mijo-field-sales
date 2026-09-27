@@ -1,6 +1,12 @@
 -- MIJO Foods :: Field Sales & Distributor Order Management
 -- Schema v1 (covers BRD sections 5-12, 18-19)
 
+CREATE TABLE IF NOT EXISTS categories (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  name          VARCHAR(100) UNIQUE NOT NULL,
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS territories (
   id            INT AUTO_INCREMENT PRIMARY KEY,
   name          VARCHAR(100) NOT NULL,
