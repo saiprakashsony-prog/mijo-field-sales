@@ -864,8 +864,8 @@ async function renderMasters() {
           </div>
         </div>
         <div class="grid cols-2">
-          <div class="field" id="ulEmployeeWrap"><label>Employee</label><select id="ulEmployee"></select></div>
-          <div class="field" id="ulDistributorWrap"><label>Distributor</label><select id="ulDistributor"></select></div>
+          <div class="field" id="ulEmployeeWrap" style="display:none"><label>Employee</label><select id="ulEmployee"></select></div>
+          <div class="field" id="ulDistributorWrap" style="display:none"><label>Distributor</label><select id="ulDistributor"></select></div>
         </div>
         <button class="btn small" id="addLogin">Create Login</button>
         <div class="error-msg" id="ulErr"></div>
@@ -1257,17 +1257,27 @@ async function renderMasters() {
   }
   async function loadEmployeeOptions() {
     const rows = await api('/employees');
-    wrap.querySelector('#ulEmployee').innerHTML = rows.map((r) => `<option value="${r.id}">${r.name} (${r.code})</option>`).join('');
+    wrap.querySelector('#ulEmployee').innerHTML = '<option value="">-- select employee --</option>' + rows.map((r) => `<option value="${r.id}">${r.name} (${r.code})</option>`).join('');
   }
   async function loadDistributorOptions() {
     const rows = await api('/distributors');
-    wrap.querySelector('#ulDistributor').innerHTML = rows.map((r) => `<option value="${r.id}">${r.name} (${r.code})</option>`).join('');
+    wrap.querySelector('#ulDistributor').innerHTML = '<option value="">-- select distributor --</option>' + rows.map((r) => `<option value="${r.id}">${r.name} (${r.code})</option>`).join('');
   }
+
+  function syncLoginRoleFields() {
+    const role = wrap.querySelector('#ulRole').value;
+    wrap.querySelector('#ulEmployeeWrap').style.display = role === 'field_employee' ? 'block' : 'none';
+    wrap.querySelector('#ulDistributorWrap').style.display = role === 'distributor' ? 'block' : 'none';
+  }
+  wrap.querySelector('#ulRole').onchange = syncLoginRoleFields;
+  syncLoginRoleFields();
 
   wrap.querySelector('#addLogin').onclick = async () => {
     const errBox = wrap.querySelector('#ulErr');
     errBox.textContent = '';
     const role = wrap.querySelector('#ulRole').value;
+    if (role === 'field_employee' && !wrap.querySelector('#ulEmployee').value) { errBox.textContent = 'Select which employee this login belongs to.'; return; }
+    if (role === 'distributor' && !wrap.querySelector('#ulDistributor').value) { errBox.textContent = 'Select which distributor this login belongs to.'; return; }
     try {
       await api('/users', { method: 'POST', body: JSON.stringify({
         name: wrap.querySelector('#ulName').value,
@@ -1277,6 +1287,9 @@ async function renderMasters() {
         employee_id: role === 'field_employee' ? wrap.querySelector('#ulEmployee').value : null,
         distributor_id: role === 'distributor' ? wrap.querySelector('#ulDistributor').value : null,
       }) });
+      wrap.querySelector('#ulName').value = '';
+      wrap.querySelector('#ulMobile').value = '';
+      wrap.querySelector('#ulPassword').value = '';
       loadLogins();
     } catch (e) { errBox.textContent = e.message; }
   };
