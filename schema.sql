@@ -91,22 +91,27 @@ CREATE TABLE IF NOT EXISTS retailers (
   INDEX idx_gps (gps_lat, gps_lng)
 );
 
+-- Pricing model: MRP is GST-inclusive (all prices in this app are GST-inclusive —
+-- gst_pct is stored only for invoice/reporting display, never added on top).
+-- Retailer Price = MRP marked down by retailer_margin_pct (what the retailer pays the distributor).
+-- Distributor Price = Retailer Price marked down by distributor_margin_pct (what the distributor pays the company).
+-- Both are computed at read time from mrp/retailer_margin_pct/distributor_margin_pct — not stored directly.
 CREATE TABLE IF NOT EXISTS products (
-  id                INT AUTO_INCREMENT PRIMARY KEY,
-  sku_code          VARCHAR(30) UNIQUE NOT NULL,
-  name              VARCHAR(150) NOT NULL,
-  category          VARCHAR(100),
-  brand             VARCHAR(100),
-  pack_size         VARCHAR(50),
-  uom               VARCHAR(20),
-  mrp               DECIMAL(10,2) NOT NULL,
-  distributor_rate  DECIMAL(10,2) NOT NULL,
-  retailer_rate     DECIMAL(10,2),
-  gst_pct           DECIMAL(5,2) NOT NULL DEFAULT 0,
-  scheme_note       VARCHAR(255),
-  moq               INT DEFAULT 1,
-  status            ENUM('active','inactive') DEFAULT 'active',
-  created_at        DATETIME DEFAULT CURRENT_TIMESTAMP
+  id                    INT AUTO_INCREMENT PRIMARY KEY,
+  sku_code              VARCHAR(30) UNIQUE NOT NULL,
+  name                  VARCHAR(150) NOT NULL,
+  category              VARCHAR(100),
+  brand                 VARCHAR(100),
+  pack_size             VARCHAR(50),
+  uom                   VARCHAR(20),
+  mrp                   DECIMAL(10,2) NOT NULL,
+  retailer_margin_pct   DECIMAL(5,2) NOT NULL DEFAULT 0,
+  distributor_margin_pct DECIMAL(5,2) NOT NULL DEFAULT 0,
+  gst_pct               DECIMAL(5,2) NOT NULL DEFAULT 0,
+  scheme_note           VARCHAR(255),
+  moq                   INT DEFAULT 1,
+  status                ENUM('active','inactive') DEFAULT 'active',
+  created_at            DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS visits (

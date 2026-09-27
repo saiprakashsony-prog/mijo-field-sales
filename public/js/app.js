@@ -244,23 +244,24 @@ async function renderBooking() {
     </div>`);
 
   const linesBox = wrap.querySelector('#lines');
-  const productOptions = products.map((p) => `<option value="${p.id}" data-rate="${p.distributor_rate}" data-gst="${p.gst_pct}">${p.name} — ${p.sku_code} (${p.pack_size || ''})</option>`).join('');
+  // rate = Retailer Price (MRP marked down by the product's retailer margin), GST-inclusive —
+  // this is what the retailer actually pays, no GST added on top.
+  const productOptions = products.map((p) => `<option value="${p.id}" data-rate="${p.retailer_price}">${p.name} — ${p.sku_code} (${p.pack_size || ''})</option>`).join('');
 
   function addLine() {
     const row = el(`
       <div class="line-item">
         <div class="field" style="margin:0"><label>Product</label><select class="lp">${productOptions}</select></div>
         <div class="field" style="margin:0"><label>Qty</label><input class="lq" type="number" min="1" value="1" /></div>
-        <div class="field" style="margin:0"><label>Rate</label><input class="lr" disabled /></div>
+        <div class="field" style="margin:0"><label>Rate (incl. GST)</label><input class="lr" disabled /></div>
         <div class="field" style="margin:0"><label>Net</label><input class="ln" disabled /></div>
         <button class="btn small secondary" style="height:36px">✕</button>
       </div>`);
     function recalc() {
       const opt = row.querySelector('.lp').selectedOptions[0];
       const rate = Number(opt.dataset.rate);
-      const gst = Number(opt.dataset.gst);
       const qty = Number(row.querySelector('.lq').value || 0);
-      const net = qty * rate * (1 + gst / 100);
+      const net = qty * rate;
       row.querySelector('.lr').value = rate.toFixed(2);
       row.querySelector('.ln').value = net.toFixed(2);
       updateTotal();
@@ -461,13 +462,15 @@ async function renderMasters() {
       </div>
       <div class="card">
         <p class="section-title">Product / SKU Master</p>
+        <p class="muted">All prices are GST-inclusive. Retailer Price = MRP marked down by Retailer Margin %. Distributor Price = Retailer Price marked down by Distributor Margin % (informational, used for your own costing reference).</p>
         <div class="grid cols-4">
           <div class="field"><label>SKU Code</label><input id="mpCode" /></div>
           <div class="field"><label>Name</label><input id="mpName" /></div>
           <div class="field"><label>Pack Size</label><input id="mpPack" /></div>
-          <div class="field"><label>MRP</label><input id="mpMrp" type="number" /></div>
-          <div class="field"><label>Distributor Rate</label><input id="mpDistRate" type="number" /></div>
-          <div class="field"><label>GST %</label><input id="mpGst" type="number" value="5" /></div>
+          <div class="field"><label>MRP (incl. GST)</label><input id="mpMrp" type="number" /></div>
+          <div class="field"><label>Retailer Margin %</label><input id="mpRetailerMargin" type="number" step="0.01" /></div>
+          <div class="field"><label>Distributor Margin %</label><input id="mpDistMargin" type="number" step="0.01" /></div>
+          <div class="field"><label>GST % (for invoice display only)</label><input id="mpGst" type="number" value="5" /></div>
         </div>
         <button class="btn small" id="addProduct">Add Product</button>
         <div id="productList" style="margin-top:10px"></div>
@@ -536,7 +539,7 @@ async function renderMasters() {
   }
   async function loadProducts() {
     const rows = await api('/products');
-    wrap.querySelector('#productList').innerHTML = `<table><thead><tr><th>SKU</th><th>Name</th><th>MRP</th><th>Dist. Rate</th><th>GST%</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${r.sku_code}</td><td>${r.name}</td><td>${fmtMoney(r.mrp)}</td><td>${fmtMoney(r.distributor_rate)}</td><td>${r.gst_pct}</td></tr>`).join('')}</tbody></table>`;
+    wrap.querySelector('#productList').innerHTML = `<table><thead><tr><th>SKU</th><th>Name</th><th>MRP</th><th>Retailer Price</th><th>Distributor Price</th><th>GST%</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${r.sku_code}</td><td>${r.name}</td><td>${fmtMoney(r.mrp)}</td><td>${fmtMoney(r.retailer_price)}</td><td>${fmtMoney(r.distributor_price)}</td><td>${r.gst_pct}</td></tr>`).join('')}</tbody></table>`;
   }
 
   wrap.querySelector('#mtState').onchange = (e) => {
@@ -562,7 +565,10 @@ async function renderMasters() {
   wrap.querySelector('#addProduct').onclick = async () => {
     await api('/products', { method: 'POST', body: JSON.stringify({
       sku_code: wrap.querySelector('#mpCode').value, name: wrap.querySelector('#mpName').value, pack_size: wrap.querySelector('#mpPack').value,
-      mrp: wrap.querySelector('#mpMrp').value, distributor_rate: wrap.querySelector('#mpDistRate').value, gst_pct: wrap.querySelector('#mpGst').value,
+      mrp: wrap.querySelector('#mpMrp').value,
+      retailer_margin_pct: wrap.querySelector('#mpRetailerMargin').value,
+      distributor_margin_pct: wrap.querySelector('#mpDistMargin').value,
+      gst_pct: wrap.querySelector('#mpGst').value,
     }) });
     loadProducts();
   };

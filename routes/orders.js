@@ -82,17 +82,22 @@ router.post('/', async (req, res) => {
     const [products] = await conn.query(`SELECT * FROM products WHERE id IN (${productIds.map(() => '?').join(',')})`, productIds);
     const productMap = Object.fromEntries(products.map((p) => [p.id, p]));
 
+    // All prices are GST-inclusive: the retailer order is billed at Retailer Price
+    // (MRP marked down by retailer_margin_pct) with no GST added on top. gst_amt is
+    // stored purely as the informational tax portion embedded within that price, for
+    // invoice/reporting display — it never changes what's actually charged.
     let total = 0;
     const computedLines = lines.map((l) => {
       const p = productMap[l.product_id];
       if (!p) throw new Error(`Product ${l.product_id} not found`);
       const qty = Number(l.qty);
       if (!qty || qty <= 0) throw new Error(`Invalid quantity for ${p.name}`);
-      const rate = Number(p.distributor_rate);
+      const retailerPrice = Math.round(Number(p.mrp) * (1 - Number(p.retailer_margin_pct) / 100) * 100) / 100;
+      const rate = retailerPrice;
       const discount = Number(l.discount_amt || 0);
-      const gross = qty * rate - discount;
-      const gst = Math.round((gross * Number(p.gst_pct)) / 100 * 100) / 100;
-      const net = Math.round((gross + gst) * 100) / 100;
+      const net = Math.round((qty * rate - discount) * 100) / 100;
+      const gstPct = Number(p.gst_pct);
+      const gst = Math.round((net - net / (1 + gstPct / 100)) * 100) / 100; // embedded tax, informational only
       total += net;
       return { product_id: p.id, qty, rate, discount_amt: discount, gst_amt: gst, net_amount: net };
     });
