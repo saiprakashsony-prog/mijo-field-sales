@@ -589,12 +589,15 @@ async function renderMasters() {
           <div class="field"><label>Mobile</label><input id="mdMobile" /></div>
           <div class="field"><label>Address</label><input id="mdAddress" /></div>
         </div>
-        <div class="field"><label>Territory</label>
-          <select id="mdTerritory"><option value="">-- none --</option></select>
-        </div>
-        <div class="field"><label>Mandals to map (select from this territory's districts)</label>
-          <div id="mdMandalChecks" class="map-search-results" style="display:block;max-height:180px">
-            <div class="muted" style="padding:8px 10px">Select a territory first.</div>
+        <div class="grid cols-3">
+          <div class="field"><label>Territory</label>
+            <select id="mdTerritory"><option value="">-- none --</option></select>
+          </div>
+          <div class="field"><label>District</label>
+            <select id="mdDistrict"><option value="">-- select territory first --</option></select>
+          </div>
+          <div class="field"><label>Mandals to map (Ctrl/Cmd-click for multiple)</label>
+            <select id="mdMandals" multiple size="5"><option value="">-- select district first --</option></select>
           </div>
         </div>
         <button class="btn small" id="addDistributor">Add Distributor</button>
@@ -947,22 +950,29 @@ async function renderMasters() {
       loadTerritories();
     } catch (e) { alert(e.message); }
   };
-  wrap.querySelector('#mdTerritory').onchange = async (e) => {
-    const box = wrap.querySelector('#mdMandalChecks');
+  wrap.querySelector('#mdTerritory').onchange = (e) => {
+    const districtSel = wrap.querySelector('#mdDistrict');
+    const mandalSel = wrap.querySelector('#mdMandals');
     const territory = territoriesCache.find((t) => String(t.id) === e.target.value);
+    mandalSel.innerHTML = '<option value="">-- select district first --</option>';
     if (!territory || !territory.districts.length) {
-      box.innerHTML = '<div class="muted" style="padding:8px 10px">Select a territory first.</div>';
+      districtSel.innerHTML = '<option value="">-- select territory first --</option>';
       return;
     }
-    const districtNames = territory.districts.map((d) => d.district);
-    const mandals = await api(`/mandals?districts=${encodeURIComponent(districtNames.join(','))}`);
-    box.innerHTML = mandals.length
-      ? mandals.map((m) => `<label style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer"><input type="checkbox" class="mdMandalCheck" value="${m.id}" style="width:auto"/> ${m.name} (${m.district})</label>`).join('')
-      : '<div class="muted" style="padding:8px 10px">No mandals added yet for this territory\'s districts — add some under Mandals below, then pick a territory again.</div>';
+    districtSel.innerHTML = '<option value="">-- select district --</option>' + territory.districts.map((d) => `<option value="${d.district}">${d.district}</option>`).join('');
+  };
+
+  wrap.querySelector('#mdDistrict').onchange = async (e) => {
+    const mandalSel = wrap.querySelector('#mdMandals');
+    if (!e.target.value) { mandalSel.innerHTML = '<option value="">-- select district first --</option>'; return; }
+    const mandals = await api(`/mandals?districts=${encodeURIComponent(e.target.value)}`);
+    mandalSel.innerHTML = mandals.length
+      ? mandals.map((m) => `<option value="${m.id}">${m.name}</option>`).join('')
+      : `<option value="">-- no mandals added yet for ${e.target.value} --</option>`;
   };
 
   wrap.querySelector('#addDistributor').onclick = async () => {
-    const mandalIds = [...wrap.querySelectorAll('.mdMandalCheck:checked')].map((c) => Number(c.value));
+    const mandalIds = [...wrap.querySelector('#mdMandals').selectedOptions].map((o) => o.value).filter(Boolean).map(Number);
     try {
       await api('/distributors', { method: 'POST', body: JSON.stringify({
         name: wrap.querySelector('#mdName').value,
@@ -975,7 +985,8 @@ async function renderMasters() {
       wrap.querySelector('#mdMobile').value = '';
       wrap.querySelector('#mdAddress').value = '';
       wrap.querySelector('#mdTerritory').value = '';
-      wrap.querySelector('#mdMandalChecks').innerHTML = '<div class="muted" style="padding:8px 10px">Select a territory first.</div>';
+      wrap.querySelector('#mdDistrict').innerHTML = '<option value="">-- select territory first --</option>';
+      wrap.querySelector('#mdMandals').innerHTML = '<option value="">-- select district first --</option>';
       loadDistributors();
     } catch (e) { alert(e.message); }
   };
