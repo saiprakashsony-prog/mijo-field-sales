@@ -458,6 +458,7 @@ async function renderMasters() {
           <div class="field"><label>Assigned Distributor</label><select id="meDistributor"></select></div>
         </div>
         <button class="btn small" id="addEmployee">Add Employee</button>
+        <div id="editEmployeeBox"></div>
         <div id="employeeList" style="margin-top:10px"></div>
       </div>
       <div class="card">
@@ -545,7 +546,64 @@ async function renderMasters() {
   }
   async function loadEmployees() {
     const rows = await api('/employees');
-    wrap.querySelector('#employeeList').innerHTML = `<table><thead><tr><th>Code</th><th>Name</th><th>Mobile</th><th>Distributors</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${r.code}</td><td>${r.name}</td><td>${r.mobile}</td><td>${r.distributors || ''}</td></tr>`).join('')}</tbody></table>`;
+    const box = wrap.querySelector('#employeeList');
+    box.innerHTML = `<table><thead><tr><th>Code</th><th>Name</th><th>Mobile</th><th>Distributors</th><th>Status</th><th></th></tr></thead>
+      <tbody>${rows.map((r) => `<tr data-id="${r.id}">
+        <td>${r.code}</td><td>${r.name}</td><td>${r.mobile}</td><td>${r.distributors || ''}</td>
+        <td><span class="badge ${r.status === 'active' ? 'delivered' : 'cancelled'}">${r.status}</span></td>
+        <td>
+          <button class="btn small secondary editEmployeeBtn">Edit</button>
+          ${r.status === 'active' ? '<button class="btn small secondary toggleEmpBtn" data-next="inactive">Deactivate</button>' : '<button class="btn small secondary toggleEmpBtn" data-next="active">Reactivate</button>'}
+        </td>
+      </tr>`).join('')}</tbody></table>`;
+
+    box.querySelectorAll('.toggleEmpBtn').forEach((btn) => {
+      btn.onclick = async () => {
+        const tr = btn.closest('tr');
+        await api(`/employees/${tr.dataset.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: btn.dataset.next }) });
+        loadEmployees();
+      };
+    });
+    box.querySelectorAll('.editEmployeeBtn').forEach((btn) => {
+      btn.onclick = () => {
+        const id = btn.closest('tr').dataset.id;
+        openEmployeeEditor(rows.find((r) => String(r.id) === id));
+      };
+    });
+    return rows;
+  }
+
+  function openEmployeeEditor(emp) {
+    const editBox = wrap.querySelector('#editEmployeeBox');
+    editBox.innerHTML = `
+      <div class="card" style="border-color:var(--brand)">
+        <p class="section-title">Edit Employee — ${emp.code}</p>
+        <div class="grid cols-3">
+          <div class="field"><label>Name</label><input id="eeName" value="${emp.name}" /></div>
+          <div class="field"><label>Mobile</label><input id="eeMobile" value="${emp.mobile}" /></div>
+          <div class="field"><label>Designation</label><input id="eeDesignation" value="${emp.designation || ''}" /></div>
+          <div class="field"><label>Assigned Distributor</label><select id="eeDistributor">${wrap.querySelector('#meDistributor').innerHTML}</select></div>
+          <div class="field"><label>Status</label>
+            <select id="eeStatus"><option value="active" ${emp.status === 'active' ? 'selected' : ''}>Active</option><option value="inactive" ${emp.status === 'inactive' ? 'selected' : ''}>Inactive</option></select>
+          </div>
+        </div>
+        <button class="btn small" id="eeSave">Save</button>
+        <button class="btn small secondary" id="eeCancel">Cancel</button>
+      </div>`;
+    editBox.querySelector('#eeCancel').onclick = () => { editBox.innerHTML = ''; };
+    editBox.querySelector('#eeSave').onclick = async () => {
+      try {
+        await api(`/employees/${emp.id}`, { method: 'PATCH', body: JSON.stringify({
+          name: editBox.querySelector('#eeName').value,
+          mobile: editBox.querySelector('#eeMobile').value,
+          designation: editBox.querySelector('#eeDesignation').value,
+          distributor_ids: [editBox.querySelector('#eeDistributor').value],
+          status: editBox.querySelector('#eeStatus').value,
+        }) });
+        editBox.innerHTML = '';
+        loadEmployees();
+      } catch (e) { alert(e.message); }
+    };
   }
   async function loadCategories() {
     const rows = await api('/categories');
