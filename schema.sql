@@ -38,6 +38,36 @@ CREATE TABLE IF NOT EXISTS mandals (
   UNIQUE KEY uniq_mandal (name, state, district)
 );
 
+-- Beats (routes): a named, repeating set of retailers a sales rep visits on specific
+-- days of the week — BRD's "beat planning". A beat's retailer list order (visit_order)
+-- is the intended visiting sequence for that route.
+CREATE TABLE IF NOT EXISTS beats (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  name          VARCHAR(150) NOT NULL,
+  territory_id  INT NULL,
+  employee_id   INT NULL,      -- the rep who walks this beat
+  status        ENUM('active','inactive') DEFAULT 'active',
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (territory_id) REFERENCES territories(id),
+  FOREIGN KEY (employee_id) REFERENCES employees(id)
+);
+
+CREATE TABLE IF NOT EXISTS beat_days (
+  beat_id       INT NOT NULL,
+  day_of_week   ENUM('mon','tue','wed','thu','fri','sat','sun') NOT NULL,
+  PRIMARY KEY (beat_id, day_of_week),
+  FOREIGN KEY (beat_id) REFERENCES beats(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS beat_retailers (
+  beat_id       INT NOT NULL,
+  retailer_id   INT NOT NULL,
+  visit_order   INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (beat_id, retailer_id),
+  FOREIGN KEY (beat_id) REFERENCES beats(id) ON DELETE CASCADE,
+  FOREIGN KEY (retailer_id) REFERENCES retailers(id) ON DELETE CASCADE
+);
+
 -- Sales returns: damaged, expired, unsold, or wrong-item stock a retailer sends back.
 -- A field employee reports one (status 'requested'); the distributor (or admin/management)
 -- approves or rejects it. Only an APPROVED return counts as a credit against the retailer's

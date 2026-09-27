@@ -177,7 +177,7 @@ function renderLogin() {
 
 // ---------- Shell / nav ----------
 const TABS_BY_ROLE = {
-  field_employee: [['newretailer', 'New Retailer'], ['booking', 'Book Order'], ['myorders', 'My Orders'], ['returns', 'Returns']],
+  field_employee: [['myroute', 'My Route'], ['newretailer', 'New Retailer'], ['booking', 'Book Order'], ['myorders', 'My Orders'], ['returns', 'Returns']],
   distributor: [['orderbook', 'Order Book'], ['consolidated', 'Consolidated Picking List'], ['returns', 'Returns']],
   sales_manager: [['dashboard', 'Dashboard'], ['orders', 'All Orders'], ['returns', 'Returns'], ['masters', 'Masters']],
   management: [['dashboard', 'Dashboard'], ['orders', 'All Orders'], ['returns', 'Returns'], ['masters', 'Masters']],
@@ -213,6 +213,7 @@ function renderShell() {
     orders: renderAllOrders,
     masters: renderMasters,
     returns: renderReturns,
+    myroute: renderMyRoute,
   };
   (renderers[state.tab] || (() => el('<div/>')))().then((node) => main.appendChild(node)).catch((e) => {
     main.appendChild(el(`<div class="card error-msg">${e.message}</div>`));
@@ -228,8 +229,36 @@ function refreshMain() {
     newretailer: renderNewRetailer, booking: renderBooking, myorders: renderMyOrders,
     orderbook: renderOrderBook, consolidated: renderConsolidated, dashboard: renderDashboard,
     orders: renderAllOrders, masters: renderMasters, returns: renderReturns,
+    myroute: renderMyRoute,
   };
   renderers[state.tab]().then((node) => main.appendChild(node));
+}
+
+// ---------- Field Employee: My Route (today's beat) ----------
+async function renderMyRoute() {
+  const data = await api('/beats/mine/today');
+  const dayLabel = { mon: 'Monday', tue: 'Tuesday', wed: 'Wednesday', thu: 'Thursday', fri: 'Friday', sat: 'Saturday', sun: 'Sunday' }[data.day] || data.day;
+
+  if (!data.beats.length) {
+    return el(`<div class="card"><p class="section-title">My Route — ${dayLabel}</p><p class="muted">No beat is scheduled for you today. Ask your admin to add one under Masters → Routes, or visit retailers outside your regular route as needed.</p></div>`);
+  }
+
+  return el(`
+    <div>
+      ${data.beats.map((beat) => {
+        const doneCount = beat.retailers.filter((r) => r.visited_today).length;
+        return `<div class="card">
+          <p class="section-title">${beat.name} — ${dayLabel} <span class="muted" style="font-weight:400">(${doneCount}/${beat.retailers.length} visited today)</span></p>
+          ${beat.retailers.length
+            ? `<table><thead><tr><th>#</th><th>Retailer</th><th>Address</th><th>Status</th></tr></thead>
+               <tbody>${beat.retailers.map((r, i) => `<tr>
+                 <td>${i + 1}</td><td>${r.name} (${r.code})</td><td>${r.address || ''}</td>
+                 <td><span class="badge ${r.visited_today ? 'delivered' : 'submitted'}">${r.visited_today ? 'Visited' : 'Pending'}</span></td>
+               </tr>`).join('')}</tbody></table>`
+            : '<p class="muted">No retailers added to this beat yet.</p>'}
+        </div>`;
+      }).join('')}
+    </div>`);
 }
 
 // ---------- Field Employee: New Retailer ----------
@@ -895,6 +924,7 @@ const MASTERS_SECTIONS = [
   ['mandals', 'Mandals'],
   ['distributors', 'Distributors'],
   ['employees', 'Field Employees'],
+  ['routes', 'Routes'],
   ['products', 'Products'],
   ['schemes', 'Schemes'],
   ['credit', 'Credit'],
@@ -984,6 +1014,30 @@ async function renderMasters() {
         <button class="btn small" id="addEmployee">Add Employee</button>
         <div id="editEmployeeBox"></div>
         <div id="employeeList" style="margin-top:10px"></div>
+      </div>
+      </div>
+      <div class="master-section" data-section="routes">
+      <div class="card">
+        <p class="section-title">Routes / Beats</p>
+        <p class="muted">A beat is a named, repeating set of retailers a rep visits on specific days of the week. Retailers are added below in the order you'd like them visited.</p>
+        <div class="grid cols-3">
+          <div class="field"><label>Beat Name</label><input id="btName" /></div>
+          <div class="field"><label>Territory (optional, filters retailer picker)</label><select id="btTerritory"><option value="">-- any --</option></select></div>
+          <div class="field"><label>Assigned Employee</label><select id="btEmployee"><option value="">-- unassigned --</option></select></div>
+        </div>
+        <div class="field"><label>Days of Week</label>
+          <div style="display:flex;gap:14px;flex-wrap:wrap;padding:8px 0">
+            ${['mon','tue','wed','thu','fri','sat','sun'].map((d) => `<label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="btDay" value="${d}" style="width:auto" /> ${d}</label>`).join('')}
+          </div>
+        </div>
+        <div class="field"><label>Retailers (check to include, in the order you check them)</label>
+          <div id="btRetailerChecks" class="map-search-results" style="display:block;max-height:220px">
+            <div class="muted" style="padding:8px 10px">Loading retailers...</div>
+          </div>
+        </div>
+        <button class="btn small" id="addBeat">Add Beat</button>
+        <div class="error-msg" id="btErr"></div>
+        <div id="beatList" style="margin-top:10px"></div>
       </div>
       </div>
       <div class="master-section" data-section="products">
@@ -1148,6 +1202,70 @@ async function renderMasters() {
     wrap.querySelector('#meDistributor').innerHTML = rows.map((r) => `<option value="${r.id}">${r.name}</option>`).join('');
     return rows;
   }
+  let beatRetailerOrder = []; // tracks check order, not DOM order, so "order you check them" is honored
+  async function loadBeatFormOptions() {
+    wrap.querySelector('#btTerritory').innerHTML = '<option value="">-- any --</option>' + territoriesCache.map((t) => `<option value="${t.id}">${t.name}</option>`).join('');
+    const employees = await api('/employees');
+    wrap.querySelector('#btEmployee').innerHTML = '<option value="">-- unassigned --</option>' + employees.map((e) => `<option value="${e.id}">${e.name} (${e.code})</option>`).join('');
+    await renderBeatRetailerChecks();
+  }
+  async function renderBeatRetailerChecks() {
+    const territoryId = wrap.querySelector('#btTerritory').value;
+    const retailers = await api(`/retailers${territoryId ? `?territory_id=${territoryId}` : ''}`);
+    beatRetailerOrder = [];
+    const box = wrap.querySelector('#btRetailerChecks');
+    box.innerHTML = retailers.length
+      ? retailers.map((r) => `<label style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer"><input type="checkbox" class="btRetailerCheck" value="${r.id}" style="width:auto"/> ${r.name} (${r.code})</label>`).join('')
+      : '<div class="muted" style="padding:8px 10px">No retailers found for that territory.</div>';
+    box.querySelectorAll('.btRetailerCheck').forEach((cb) => {
+      cb.onchange = () => {
+        const id = Number(cb.value);
+        if (cb.checked) { if (!beatRetailerOrder.includes(id)) beatRetailerOrder.push(id); }
+        else { beatRetailerOrder = beatRetailerOrder.filter((x) => x !== id); }
+      };
+    });
+  }
+  wrap.querySelector('#btTerritory').onchange = renderBeatRetailerChecks;
+
+  async function loadBeats() {
+    const rows = await api('/beats');
+    const box = wrap.querySelector('#beatList');
+    box.innerHTML = rows.length
+      ? `<table><thead><tr><th>Name</th><th>Territory</th><th>Employee</th><th>Days</th><th>Retailers</th><th></th></tr></thead>
+         <tbody>${rows.map((r) => `<tr data-id="${r.id}">
+           <td>${r.name}</td><td>${r.territory_name || ''}</td><td>${r.employee_name ? `${r.employee_name} (${r.employee_code})` : ''}</td>
+           <td>${r.days.join(', ')}</td><td>${r.retailer_count}</td>
+           <td><button class="btn small secondary delBeatBtn">Delete</button></td>
+         </tr>`).join('')}</tbody></table>`
+      : '<p class="muted">No beats yet.</p>';
+    box.querySelectorAll('.delBeatBtn').forEach((btn) => {
+      btn.onclick = async () => {
+        if (!confirm('Delete this beat?')) return;
+        await api(`/beats/${btn.closest('tr').dataset.id}`, { method: 'DELETE' });
+        loadBeats();
+      };
+    });
+  }
+  wrap.querySelector('#addBeat').onclick = async () => {
+    const errBox = wrap.querySelector('#btErr');
+    errBox.textContent = '';
+    const days = [...wrap.querySelectorAll('.btDay:checked')].map((c) => c.value);
+    if (!days.length) { errBox.textContent = 'Select at least one day of the week.'; return; }
+    try {
+      await api('/beats', { method: 'POST', body: JSON.stringify({
+        name: wrap.querySelector('#btName').value,
+        territory_id: wrap.querySelector('#btTerritory').value || null,
+        employee_id: wrap.querySelector('#btEmployee').value || null,
+        days,
+        retailer_ids: beatRetailerOrder,
+      }) });
+      wrap.querySelector('#btName').value = '';
+      wrap.querySelectorAll('.btDay').forEach((c) => { c.checked = false; });
+      await renderBeatRetailerChecks();
+      loadBeats();
+    } catch (e) { errBox.textContent = e.message; }
+  };
+
   async function loadEmployees() {
     const rows = await api('/employees');
     const box = wrap.querySelector('#employeeList');
@@ -1664,6 +1782,8 @@ async function renderMasters() {
   };
 
   await loadTerritories();
+  await loadBeatFormOptions();
+  await loadBeats();
   await loadMandals();
   await loadDistributors();
   await loadEmployees();
