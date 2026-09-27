@@ -118,7 +118,7 @@ router.post('/', async (req, res) => {
 });
 
 // Simplified retailer-level credit calculation — not per-invoice ageing:
-//   outstanding = SUM(total_amount of billed orders) - SUM(payments), floored at 0
+//   outstanding = SUM(total_amount of billed orders) - SUM(payments) - SUM(approved returns), floored at 0
 //   is_overdue  = true if any billed order's (order_date + payment_terms_days) is in the
 //                 past AND there's still an outstanding balance. This flags the retailer
 //                 as a whole, not which specific invoice is overdue.
@@ -136,7 +136,11 @@ async function computeCreditStatus(conn, retailerId) {
     `SELECT COALESCE(SUM(amount), 0) AS total_paid FROM payments WHERE retailer_id = ?`,
     [retailerId]
   );
-  const outstanding = Math.max(0, Math.round((Number(total_billed) - Number(total_paid)) * 100) / 100);
+  const [[{ total_returned }]] = await conn.query(
+    `SELECT COALESCE(SUM(amount), 0) AS total_returned FROM sales_returns WHERE retailer_id = ? AND status = 'approved'`,
+    [retailerId]
+  );
+  const outstanding = Math.max(0, Math.round((Number(total_billed) - Number(total_paid) - Number(total_returned)) * 100) / 100);
 
   const [[{ oldest_overdue_date }]] = await conn.query(
     `SELECT MIN(order_date) AS oldest_overdue_date FROM orders
@@ -166,6 +170,7 @@ router.get('/credit-summary', async (req, res) => {
     `SELECT r.id, r.name, r.code, r.credit_limit, r.payment_terms_days, d.name AS distributor_name,
             COALESCE(billed.total_billed, 0) AS total_billed,
             COALESCE(paid.total_paid, 0) AS total_paid,
+            COALESCE(returned.total_returned, 0) AS total_returned,
             oldest.oldest_billed_date
      FROM retailers r
      LEFT JOIN distributors d ON d.id = r.distributor_id
@@ -177,6 +182,9 @@ router.get('/credit-summary', async (req, res) => {
        SELECT retailer_id, SUM(amount) AS total_paid FROM payments GROUP BY retailer_id
      ) paid ON paid.retailer_id = r.id
      LEFT JOIN (
+       SELECT retailer_id, SUM(amount) AS total_returned FROM sales_returns WHERE status = 'approved' GROUP BY retailer_id
+     ) returned ON returned.retailer_id = r.id
+     LEFT JOIN (
        SELECT retailer_id, MIN(order_date) AS oldest_billed_date FROM orders
        WHERE status IN ('dispatched','delivered') GROUP BY retailer_id
      ) oldest ON oldest.retailer_id = r.id
@@ -184,7 +192,7 @@ router.get('/credit-summary', async (req, res) => {
   );
   const today = new Date().toISOString().slice(0, 10);
   res.json(rows.map((r) => {
-    const outstanding = Math.max(0, Math.round((Number(r.total_billed) - Number(r.total_paid)) * 100) / 100);
+    const outstanding = Math.max(0, Math.round((Number(r.total_billed) - Number(r.total_paid) - Number(r.total_returned)) * 100) / 100);
     const dueDate = r.oldest_billed_date
       ? new Date(new Date(r.oldest_billed_date).getTime() + r.payment_terms_days * 86400000).toISOString().slice(0, 10)
       : null;

@@ -38,6 +38,35 @@ CREATE TABLE IF NOT EXISTS mandals (
   UNIQUE KEY uniq_mandal (name, state, district)
 );
 
+-- Sales returns: damaged, expired, unsold, or wrong-item stock a retailer sends back.
+-- A field employee reports one (status 'requested'); the distributor (or admin/management)
+-- approves or rejects it. Only an APPROVED return counts as a credit against the retailer's
+-- outstanding balance — see computeCreditStatus in routes/retailers.js, which now also
+-- subtracts SUM(amount) of approved returns, exactly like it already does for payments.
+CREATE TABLE IF NOT EXISTS sales_returns (
+  id              INT AUTO_INCREMENT PRIMARY KEY,
+  return_no       VARCHAR(40) UNIQUE NOT NULL,
+  order_id        INT NULL,      -- optional link to the original order, for traceability
+  retailer_id     INT NOT NULL,
+  distributor_id  INT NOT NULL,
+  product_id      INT NOT NULL,
+  qty             INT NOT NULL,           -- packs being returned
+  rate            DECIMAL(10,2) NOT NULL, -- credit rate per pack (from the order if linked, else current retailer price)
+  amount          DECIMAL(12,2) NOT NULL, -- qty * rate — the credit note value once approved
+  return_type     ENUM('damage','expiry','unsold','wrong_item','other') NOT NULL,
+  reason          VARCHAR(255),
+  status          ENUM('requested','approved','rejected') DEFAULT 'requested',
+  requested_by    INT,           -- employees.id
+  reviewed_by     INT,           -- users.id (whoever approved/rejected)
+  reviewed_at     DATETIME,
+  review_note     VARCHAR(255),
+  created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (order_id) REFERENCES orders(id),
+  FOREIGN KEY (retailer_id) REFERENCES retailers(id),
+  FOREIGN KEY (distributor_id) REFERENCES distributors(id),
+  FOREIGN KEY (product_id) REFERENCES products(id)
+);
+
 -- Schemes: admin-defined discounts, auto-applied at order booking time (never entered
 -- manually by a field employee) and always recomputed server-side on order creation so a
 -- tampered client request can't apply a discount that wasn't actually authorized.

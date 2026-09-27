@@ -177,11 +177,11 @@ function renderLogin() {
 
 // ---------- Shell / nav ----------
 const TABS_BY_ROLE = {
-  field_employee: [['newretailer', 'New Retailer'], ['booking', 'Book Order'], ['myorders', 'My Orders']],
-  distributor: [['orderbook', 'Order Book'], ['consolidated', 'Consolidated Picking List']],
-  sales_manager: [['dashboard', 'Dashboard'], ['orders', 'All Orders'], ['masters', 'Masters']],
-  management: [['dashboard', 'Dashboard'], ['orders', 'All Orders'], ['masters', 'Masters']],
-  super_admin: [['dashboard', 'Dashboard'], ['orders', 'All Orders'], ['masters', 'Masters']],
+  field_employee: [['newretailer', 'New Retailer'], ['booking', 'Book Order'], ['myorders', 'My Orders'], ['returns', 'Returns']],
+  distributor: [['orderbook', 'Order Book'], ['consolidated', 'Consolidated Picking List'], ['returns', 'Returns']],
+  sales_manager: [['dashboard', 'Dashboard'], ['orders', 'All Orders'], ['returns', 'Returns'], ['masters', 'Masters']],
+  management: [['dashboard', 'Dashboard'], ['orders', 'All Orders'], ['returns', 'Returns'], ['masters', 'Masters']],
+  super_admin: [['dashboard', 'Dashboard'], ['orders', 'All Orders'], ['returns', 'Returns'], ['masters', 'Masters']],
 };
 
 function renderShell() {
@@ -212,6 +212,7 @@ function renderShell() {
     dashboard: renderDashboard,
     orders: renderAllOrders,
     masters: renderMasters,
+    returns: renderReturns,
   };
   (renderers[state.tab] || (() => el('<div/>')))().then((node) => main.appendChild(node)).catch((e) => {
     main.appendChild(el(`<div class="card error-msg">${e.message}</div>`));
@@ -226,7 +227,7 @@ function refreshMain() {
   const renderers = {
     newretailer: renderNewRetailer, booking: renderBooking, myorders: renderMyOrders,
     orderbook: renderOrderBook, consolidated: renderConsolidated, dashboard: renderDashboard,
-    orders: renderAllOrders, masters: renderMasters,
+    orders: renderAllOrders, masters: renderMasters, returns: renderReturns,
   };
   renderers[state.tab]().then((node) => main.appendChild(node));
 }
@@ -562,6 +563,116 @@ async function renderMyOrders() {
       <p class="section-title">My Orders</p>
       ${ordersTable(orders)}
     </div>`);
+}
+
+// ---------- Returns (field employee reports, distributor/admin approves) ----------
+async function renderReturns() {
+  const role = state.user.role;
+  const canReport = role === 'field_employee';
+  const canReview = role === 'distributor' || ['super_admin', 'management', 'sales_manager'].includes(role);
+
+  const orders = canReport ? await api('/orders') : [];
+  const retailers = canReport ? await api(`/retailers?employee_id=${state.user.employee_id}`) : [];
+  const products = canReport ? await api('/products?active=1') : [];
+
+  const wrap = el(`
+    <div>
+      ${canReport ? `
+      <div class="card">
+        <p class="section-title">Report a Return</p>
+        <div class="grid cols-3">
+          <div class="field"><label>Retailer *</label>
+            <select id="rtRetailer"><option value="">-- select --</option>${retailers.map((r) => `<option value="${r.id}">${r.name} (${r.code})</option>`).join('')}</select>
+          </div>
+          <div class="field"><label>Related Order (optional)</label>
+            <select id="rtOrder"><option value="">-- none --</option></select>
+          </div>
+          <div class="field"><label>Product *</label>
+            <select id="rtProduct"><option value="">-- select --</option>${products.map((p) => `<option value="${p.id}">${p.name} (${p.sku_code})</option>`).join('')}</select>
+          </div>
+          <div class="field"><label>Qty (packs) *</label><input id="rtQty" type="number" min="1" /></div>
+          <div class="field"><label>Return Type *</label>
+            <select id="rtType">
+              <option value="damage">Damage</option>
+              <option value="expiry">Expiry</option>
+              <option value="unsold">Unsold</option>
+              <option value="wrong_item">Wrong Item</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div class="field"><label>Reason (optional)</label><input id="rtReason" /></div>
+        </div>
+        <button class="btn small" id="submitReturn">Report Return</button>
+        <div class="error-msg" id="rtErr"></div>
+        <div id="rtOk"></div>
+      </div>` : ''}
+      <div class="card">
+        <p class="section-title">${canReport ? 'My Reported Returns' : 'Returns'}</p>
+        <div id="returnsList"></div>
+      </div>
+    </div>`);
+
+  if (canReport) {
+    wrap.querySelector('#rtRetailer').onchange = (e) => {
+      const retId = e.target.value;
+      const orderSel = wrap.querySelector('#rtOrder');
+      const matching = orders.filter((o) => String(o.retailer_id) === retId);
+      orderSel.innerHTML = '<option value="">-- none --</option>' + matching.map((o) => `<option value="${o.id}">${o.order_no} (${o.order_date})</option>`).join('');
+    };
+    wrap.querySelector('#submitReturn').onclick = async () => {
+      const errBox = wrap.querySelector('#rtErr');
+      const okBox = wrap.querySelector('#rtOk');
+      errBox.textContent = ''; okBox.textContent = '';
+      try {
+        const result = await api('/returns', { method: 'POST', body: JSON.stringify({
+          retailer_id: wrap.querySelector('#rtRetailer').value,
+          order_id: wrap.querySelector('#rtOrder').value || null,
+          product_id: wrap.querySelector('#rtProduct').value,
+          qty: wrap.querySelector('#rtQty').value,
+          return_type: wrap.querySelector('#rtType').value,
+          reason: wrap.querySelector('#rtReason').value,
+        }) });
+        okBox.innerHTML = `<p style="color:var(--ok)">Return ${result.return_no} reported for ${fmtMoney(result.amount)}, pending approval.</p>`;
+        wrap.querySelector('#rtQty').value = '';
+        wrap.querySelector('#rtReason').value = '';
+        loadReturnsList();
+      } catch (e) { errBox.textContent = e.message; }
+    };
+  }
+
+  async function loadReturnsList() {
+    const rows = await api('/returns');
+    const box = wrap.querySelector('#returnsList');
+    box.innerHTML = rows.length
+      ? `<table><thead><tr><th>Return No</th><th>Date</th><th>Retailer</th><th>Product</th><th>Qty</th><th>Amount</th><th>Type</th><th>Status</th>${canReview ? '<th></th>' : ''}</tr></thead>
+         <tbody>${rows.map((r) => `<tr data-id="${r.id}">
+           <td>${r.return_no}</td><td>${r.created_at.slice(0, 10)}</td><td>${r.retailer_name} (${r.retailer_code})</td>
+           <td>${r.product_name} (${r.sku_code})</td><td>${r.qty}</td><td>${fmtMoney(r.amount)}</td>
+           <td>${r.return_type.replace('_', ' ')}</td>
+           <td><span class="badge ${r.status === 'approved' ? 'delivered' : r.status === 'rejected' ? 'cancelled' : 'submitted'}">${r.status}</span></td>
+           ${canReview ? `<td>${r.status === 'requested' ? `<button class="btn small secondary approveReturnBtn">Approve</button> <button class="btn small secondary rejectReturnBtn">Reject</button>` : ''}</td>` : ''}
+         </tr>`).join('')}</tbody></table>`
+      : '<p class="muted">No returns yet.</p>';
+
+    if (canReview) {
+      box.querySelectorAll('.approveReturnBtn').forEach((btn) => {
+        btn.onclick = async () => {
+          await api(`/returns/${btn.closest('tr').dataset.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'approved' }) });
+          loadReturnsList();
+        };
+      });
+      box.querySelectorAll('.rejectReturnBtn').forEach((btn) => {
+        btn.onclick = async () => {
+          const note = prompt('Reason for rejecting? (optional)');
+          await api(`/returns/${btn.closest('tr').dataset.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'rejected', review_note: note || null }) });
+          loadReturnsList();
+        };
+      });
+    }
+  }
+  loadReturnsList();
+
+  return wrap;
 }
 
 function ordersTable(orders, opts = {}) {
