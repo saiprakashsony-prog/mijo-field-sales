@@ -18,6 +18,7 @@ app.use('/api/categories', require('./routes/categories'));
 app.use('/api/retailers', require('./routes/retailers'));
 app.use('/api/visits', require('./routes/visits'));
 app.use('/api/orders', require('./routes/orders'));
+app.use('/api/schemes', require('./routes/schemes').router);
 app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/users', require('./routes/users'));
 

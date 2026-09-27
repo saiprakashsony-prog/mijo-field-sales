@@ -465,6 +465,11 @@ async function renderBooking() {
   // full cartons, loose packs, or both — total qty = cartons * units_per_carton + packs.
   const productOptions = products.map((p) => `<option value="${p.id}" data-rate="${p.retailer_price}" data-upc="${p.units_per_carton}">${p.name} — ${p.sku_code} (${p.pack_size || ''}, ${p.units_per_carton} packs/carton)</option>`).join('');
 
+  function currentRetailer() {
+    const id = wrap.querySelector('#bRetailer').value;
+    return retailers.find((r) => String(r.id) === id) || null;
+  }
+
   function addLine() {
     const row = el(`
       <div class="line-item">
@@ -474,17 +479,40 @@ async function renderBooking() {
         <div class="field" style="margin:0"><label>Rate/pack</label><input class="lr" disabled /></div>
         <div class="field" style="margin:0"><label>Net</label><input class="ln" disabled /></div>
         <button class="btn small secondary" style="height:36px">✕</button>
+        <div class="lscheme muted" style="grid-column:1/-1;font-size:12px;min-height:16px"></div>
       </div>`);
-    function recalc() {
+    let recalcToken = 0; // guards against an older scheme lookup overwriting a newer one
+    async function recalc() {
       const opt = row.querySelector('.lp').selectedOptions[0];
       const rate = Number(opt.dataset.rate);
       const upc = Number(opt.dataset.upc) || 1;
       const cartons = Number(row.querySelector('.lc').value || 0);
       const packs = Number(row.querySelector('.lq').value || 0);
       const totalQty = cartons * upc + packs;
-      const net = totalQty * rate;
+      const gross = totalQty * rate;
       row.querySelector('.lr').value = rate.toFixed(2);
-      row.querySelector('.ln').value = net.toFixed(2);
+      row.querySelector('.ln').value = gross.toFixed(2);
+      row.dataset.discount = '0';
+      updateTotal();
+
+      const retailer = currentRetailer();
+      const schemeNote = row.querySelector('.lscheme');
+      if (!retailer || !totalQty) { schemeNote.textContent = ''; return; }
+
+      const myToken = ++recalcToken;
+      try {
+        const match = await api(`/schemes/match?product_id=${opt.value}&territory_id=${retailer.territory_id || ''}&distributor_id=${retailer.distributor_id || ''}&qty=${totalQty}&rate=${rate}`);
+        if (myToken !== recalcToken) return; // a newer input change superseded this lookup
+        if (match.scheme) {
+          const net = Math.max(0, gross - match.discount_amt);
+          row.dataset.discount = String(match.discount_amt);
+          row.querySelector('.ln').value = net.toFixed(2);
+          schemeNote.textContent = `Scheme applied: ${match.scheme.name} (-${fmtMoney(match.discount_amt)})`;
+          schemeNote.style.color = 'var(--ok)';
+        } else {
+          schemeNote.textContent = '';
+        }
+      } catch { schemeNote.textContent = ''; }
       updateTotal();
     }
     row.querySelector('.lp').onchange = recalc;
@@ -500,6 +528,9 @@ async function renderBooking() {
     wrap.querySelector('#totalVal').textContent = fmtMoney(total);
   }
   wrap.querySelector('#addLine').onclick = addLine;
+  wrap.querySelector('#bRetailer').onchange = () => {
+    linesBox.querySelectorAll('.line-item').forEach((row) => row.querySelector('.lp').dispatchEvent(new Event('change')));
+  };
   addLine();
 
   wrap.querySelector('#submitOrder').onclick = async () => {
@@ -753,6 +784,7 @@ const MASTERS_SECTIONS = [
   ['distributors', 'Distributors'],
   ['employees', 'Field Employees'],
   ['products', 'Products'],
+  ['schemes', 'Schemes'],
   ['logins', 'Logins'],
 ];
 
@@ -867,6 +899,28 @@ async function renderMasters() {
         <button class="btn small" id="addProduct">Add Product</button>
         <div id="editProductBox"></div>
         <div id="productList" style="margin-top:10px"></div>
+      </div>
+      </div>
+      <div class="master-section" data-section="schemes">
+      <div class="card">
+        <p class="section-title">Schemes</p>
+        <p class="muted">Discounts are never entered by field employees — they're auto-applied at order booking time whenever an order matches an active scheme here. Leave Product/Territory/Distributor as "All" to apply everywhere on that dimension.</p>
+        <div class="grid cols-3">
+          <div class="field"><label>Scheme Name</label><input id="msName" /></div>
+          <div class="field"><label>Discount Type</label>
+            <select id="msType"><option value="percent">Percent (%)</option><option value="flat">Flat ₹ per pack</option></select>
+          </div>
+          <div class="field"><label>Discount Value</label><input id="msValue" type="number" step="0.01" /></div>
+          <div class="field"><label>Minimum Qty (packs) to Qualify</label><input id="msMinQty" type="number" min="1" value="1" /></div>
+          <div class="field"><label>Product</label><select id="msProduct"><option value="">-- All Products --</option></select></div>
+          <div class="field"><label>Territory</label><select id="msTerritory"><option value="">-- All Territories --</option></select></div>
+          <div class="field"><label>Distributor</label><select id="msDistributor"><option value="">-- All Distributors --</option></select></div>
+          <div class="field"><label>Valid From (optional)</label><input id="msFrom" type="date" /></div>
+          <div class="field"><label>Valid To (optional)</label><input id="msTo" type="date" /></div>
+        </div>
+        <button class="btn small" id="addScheme">Add Scheme</button>
+        <div class="error-msg" id="msErr"></div>
+        <div id="schemeList" style="margin-top:10px"></div>
       </div>
       </div>
       <div class="master-section" data-section="logins">
@@ -1067,6 +1121,68 @@ async function renderMasters() {
       wrap.querySelector('#mmName').value = '';
       loadMandals();
     } catch (e) { alert(e.message); }
+  };
+
+  async function loadSchemeFormOptions() {
+    const [products, distributors] = await Promise.all([api('/products'), api('/distributors')]);
+    wrap.querySelector('#msProduct').innerHTML = '<option value="">-- All Products --</option>' + products.map((p) => `<option value="${p.id}">${p.name} (${p.sku_code})</option>`).join('');
+    wrap.querySelector('#msDistributor').innerHTML = '<option value="">-- All Distributors --</option>' + distributors.map((d) => `<option value="${d.id}">${d.name}</option>`).join('');
+    wrap.querySelector('#msTerritory').innerHTML = '<option value="">-- All Territories --</option>' + territoriesCache.map((t) => `<option value="${t.id}">${t.name}</option>`).join('');
+  }
+  async function loadSchemes() {
+    const rows = await api('/schemes');
+    const box = wrap.querySelector('#schemeList');
+    box.innerHTML = `<table><thead><tr><th>Name</th><th>Discount</th><th>Min Qty</th><th>Product</th><th>Territory</th><th>Distributor</th><th>Valid</th><th>Status</th><th></th></tr></thead>
+      <tbody>${rows.map((r) => `<tr data-id="${r.id}">
+        <td>${r.name}</td>
+        <td>${r.discount_type === 'percent' ? Number(r.discount_value) + '%' : fmtMoney(r.discount_value) + '/pack'}</td>
+        <td>${r.min_qty}</td>
+        <td>${r.product_name ? `${r.product_name} (${r.sku_code})` : 'All'}</td>
+        <td>${r.territory_name || 'All'}</td>
+        <td>${r.distributor_name || 'All'}</td>
+        <td>${r.valid_from || '…'} to ${r.valid_to || '…'}</td>
+        <td><span class="badge ${r.status === 'active' ? 'delivered' : 'cancelled'}">${r.status}</span></td>
+        <td>
+          <button class="btn small secondary toggleSchemeBtn" data-next="${r.status === 'active' ? 'inactive' : 'active'}">${r.status === 'active' ? 'Deactivate' : 'Reactivate'}</button>
+          <button class="btn small secondary delSchemeBtn">Delete</button>
+        </td>
+      </tr>`).join('')}</tbody></table>`;
+    box.querySelectorAll('.toggleSchemeBtn').forEach((btn) => {
+      btn.onclick = async () => {
+        await api(`/schemes/${btn.closest('tr').dataset.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: btn.dataset.next }) });
+        loadSchemes();
+      };
+    });
+    box.querySelectorAll('.delSchemeBtn').forEach((btn) => {
+      btn.onclick = async () => {
+        if (!confirm('Delete this scheme?')) return;
+        await api(`/schemes/${btn.closest('tr').dataset.id}`, { method: 'DELETE' });
+        loadSchemes();
+      };
+    });
+  }
+  wrap.querySelector('#addScheme').onclick = async () => {
+    const errBox = wrap.querySelector('#msErr');
+    errBox.textContent = '';
+    try {
+      await api('/schemes', { method: 'POST', body: JSON.stringify({
+        name: wrap.querySelector('#msName').value,
+        discount_type: wrap.querySelector('#msType').value,
+        discount_value: wrap.querySelector('#msValue').value,
+        min_qty: wrap.querySelector('#msMinQty').value || 1,
+        product_id: wrap.querySelector('#msProduct').value || null,
+        territory_id: wrap.querySelector('#msTerritory').value || null,
+        distributor_id: wrap.querySelector('#msDistributor').value || null,
+        valid_from: wrap.querySelector('#msFrom').value || null,
+        valid_to: wrap.querySelector('#msTo').value || null,
+      }) });
+      wrap.querySelector('#msName').value = '';
+      wrap.querySelector('#msValue').value = '';
+      wrap.querySelector('#msMinQty').value = '1';
+      wrap.querySelector('#msFrom').value = '';
+      wrap.querySelector('#msTo').value = '';
+      loadSchemes();
+    } catch (e) { errBox.textContent = e.message; }
   };
 
   async function loadCategories() {
@@ -1341,6 +1457,8 @@ async function renderMasters() {
   await loadProducts();
   await loadEmployeeOptions();
   await loadDistributorOptions();
+  await loadSchemeFormOptions();
+  await loadSchemes();
   await loadLogins();
   return wrap;
 }

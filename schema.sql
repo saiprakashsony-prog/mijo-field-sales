@@ -38,6 +38,29 @@ CREATE TABLE IF NOT EXISTS mandals (
   UNIQUE KEY uniq_mandal (name, state, district)
 );
 
+-- Schemes: admin-defined discounts, auto-applied at order booking time (never entered
+-- manually by a field employee) and always recomputed server-side on order creation so a
+-- tampered client request can't apply a discount that wasn't actually authorized.
+-- NULL on product_id/territory_id/distributor_id means "applies to all" for that dimension.
+-- NULL on valid_from/valid_to means "no start/end limit" on that side.
+CREATE TABLE IF NOT EXISTS schemes (
+  id              INT AUTO_INCREMENT PRIMARY KEY,
+  name            VARCHAR(150) NOT NULL,
+  discount_type   ENUM('percent','flat') NOT NULL,
+  discount_value  DECIMAL(10,2) NOT NULL,   -- percent (0-100) or a flat ₹ amount per pack
+  min_qty         INT NOT NULL DEFAULT 1,   -- minimum total pack qty on the line to qualify
+  product_id      INT NULL,
+  territory_id    INT NULL,
+  distributor_id  INT NULL,
+  valid_from      DATE NULL,
+  valid_to        DATE NULL,
+  status          ENUM('active','inactive') DEFAULT 'active',
+  created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (product_id) REFERENCES products(id),
+  FOREIGN KEY (territory_id) REFERENCES territories(id),
+  FOREIGN KEY (distributor_id) REFERENCES distributors(id)
+);
+
 -- A distributor's serviceable mandals (chosen from the mandals under their territory's districts).
 CREATE TABLE IF NOT EXISTS distributor_mandals (
   distributor_id  INT NOT NULL,
@@ -199,6 +222,7 @@ CREATE TABLE IF NOT EXISTS order_lines (
   pack_qty      INT NOT NULL DEFAULT 0,  -- loose individual packs ordered on top of full cartons
   rate          DECIMAL(10,2) NOT NULL,
   discount_amt  DECIMAL(10,2) DEFAULT 0,
+  scheme_id     INT NULL,                -- which scheme (if any) produced discount_amt, for audit
   gst_amt       DECIMAL(10,2) DEFAULT 0,
   net_amount    DECIMAL(12,2) NOT NULL,
   FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,

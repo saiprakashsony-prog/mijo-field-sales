@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../db');
 const { authRequired, allowRoles } = require('../middleware/auth');
+const { findBestScheme } = require('./schemes');
 
 const router = express.Router();
 router.use(authRequired);
@@ -74,7 +75,7 @@ router.post('/', async (req, res) => {
   try {
     await conn.beginTransaction();
 
-    const [[retailer]] = await conn.query('SELECT id, distributor_id FROM retailers WHERE id = ?', [retailer_id]);
+    const [[retailer]] = await conn.query('SELECT id, distributor_id, territory_id FROM retailers WHERE id = ?', [retailer_id]);
     if (!retailer) throw new Error('Retailer not found');
     const distributorId = retailer.distributor_id; // auto-routed, not chosen by the employee
 
@@ -88,8 +89,11 @@ router.post('/', async (req, res) => {
     // invoice/reporting display — it never changes what's actually charged.
     // A line can be ordered as full cartons, loose packs, or both — qty (the base unit
     // pricing runs on) is always resolved to total packs: carton_qty * units_per_carton + pack_qty.
+    // The discount is NEVER taken from the client — it's always recomputed here from active
+    // schemes, so a tampered request can't apply a discount that wasn't actually authorized.
     let total = 0;
-    const computedLines = lines.map((l) => {
+    const computedLines = [];
+    for (const l of lines) {
       const p = productMap[l.product_id];
       if (!p) throw new Error(`Product ${l.product_id} not found`);
       const cartonQty = Number(l.carton_qty || 0);
@@ -99,13 +103,19 @@ router.post('/', async (req, res) => {
       if (!qty || qty <= 0) throw new Error(`Invalid quantity for ${p.name}`);
       const retailerPrice = Math.round(Number(p.mrp) * (1 - Number(p.retailer_margin_pct) / 100) * 100) / 100;
       const rate = retailerPrice;
-      const discount = Number(l.discount_amt || 0);
+
+      const match = await findBestScheme(conn, {
+        product_id: p.id, territory_id: retailer.territory_id, distributor_id: distributorId, qty, rate,
+      });
+      const discount = match ? match.discount_amt : 0;
+      const schemeId = match ? match.scheme.id : null;
+
       const net = Math.round((qty * rate - discount) * 100) / 100;
       const gstPct = Number(p.gst_pct);
       const gst = Math.round((net - net / (1 + gstPct / 100)) * 100) / 100; // embedded tax, informational only
       total += net;
-      return { product_id: p.id, qty, carton_qty: cartonQty, pack_qty: packQty, rate, discount_amt: discount, gst_amt: gst, net_amount: net };
-    });
+      computedLines.push({ product_id: p.id, qty, carton_qty: cartonQty, pack_qty: packQty, rate, discount_amt: discount, scheme_id: schemeId, gst_amt: gst, net_amount: net });
+    }
 
     const orderNo = genOrderNo();
     const [orderResult] = await conn.query(
@@ -117,9 +127,9 @@ router.post('/', async (req, res) => {
 
     for (const cl of computedLines) {
       await conn.query(
-        `INSERT INTO order_lines (order_id, product_id, qty, carton_qty, pack_qty, rate, discount_amt, gst_amt, net_amount)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [orderId, cl.product_id, cl.qty, cl.carton_qty, cl.pack_qty, cl.rate, cl.discount_amt, cl.gst_amt, cl.net_amount]
+        `INSERT INTO order_lines (order_id, product_id, qty, carton_qty, pack_qty, rate, discount_amt, scheme_id, gst_amt, net_amount)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [orderId, cl.product_id, cl.qty, cl.carton_qty, cl.pack_qty, cl.rate, cl.discount_amt, cl.scheme_id, cl.gst_amt, cl.net_amount]
       );
     }
     await conn.query(

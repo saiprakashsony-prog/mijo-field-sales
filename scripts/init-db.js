@@ -47,6 +47,9 @@ async function migrate(conn) {
   await addColumnIfMissing('products', 'units_per_carton', 'units_per_carton INT NOT NULL DEFAULT 1 AFTER gst_pct');
   await addColumnIfMissing('order_lines', 'carton_qty', 'carton_qty INT NOT NULL DEFAULT 0 AFTER qty');
   await addColumnIfMissing('order_lines', 'pack_qty', 'pack_qty INT NOT NULL DEFAULT 0 AFTER carton_qty');
+
+  // Scheme engine: track which scheme (if any) produced a line's discount
+  await addColumnIfMissing('order_lines', 'scheme_id', 'scheme_id INT NULL AFTER discount_amt');
 }
 
 async function run() {
