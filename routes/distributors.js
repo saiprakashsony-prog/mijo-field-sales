@@ -35,4 +35,16 @@ router.patch('/:id/status', allowRoles('super_admin', 'management'), async (req,
   res.json({ ok: true });
 });
 
+router.delete('/:id', allowRoles('super_admin', 'management'), async (req, res) => {
+  try {
+    await pool.query('DELETE FROM distributors WHERE id = ?', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) {
+    if (e.code === 'ER_ROW_IS_REFERENCED_2' || e.code === 'ER_ROW_IS_REFERENCED') {
+      return res.status(409).json({ error: 'This distributor already has employees, retailers, orders or a login linked to it, so it cannot be deleted. Deactivate it instead.' });
+    }
+    throw e;
+  }
+});
+
 module.exports = router;

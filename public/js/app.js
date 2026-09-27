@@ -501,12 +501,32 @@ async function renderMasters() {
 
   async function loadTerritories() {
     const rows = await api('/territories');
-    wrap.querySelector('#territoryList').innerHTML = `<table><thead><tr><th>Name</th><th>State</th><th>District</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${r.name}</td><td>${r.state || ''}</td><td>${r.district || ''}</td></tr>`).join('')}</tbody></table>`;
+    const box = wrap.querySelector('#territoryList');
+    box.innerHTML = `<table><thead><tr><th>Name</th><th>State</th><th>District</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr data-id="${r.id}"><td>${r.name}</td><td>${r.state || ''}</td><td>${r.district || ''}</td><td><button class="btn small secondary delTerritoryBtn">Delete</button></td></tr>`).join('')}</tbody></table>`;
+    box.querySelectorAll('.delTerritoryBtn').forEach((btn) => {
+      btn.onclick = async () => {
+        if (!confirm('Delete this territory?')) return;
+        try {
+          await api(`/territories/${btn.closest('tr').dataset.id}`, { method: 'DELETE' });
+          loadTerritories();
+        } catch (e) { alert(e.message); }
+      };
+    });
     return rows;
   }
   async function loadDistributors() {
     const rows = await api('/distributors');
-    wrap.querySelector('#distributorList').innerHTML = `<table><thead><tr><th>Code</th><th>Name</th><th>Mobile</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${r.code}</td><td>${r.name}</td><td>${r.mobile}</td></tr>`).join('')}</tbody></table>`;
+    const box = wrap.querySelector('#distributorList');
+    box.innerHTML = `<table><thead><tr><th>Code</th><th>Name</th><th>Mobile</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr data-id="${r.id}"><td>${r.code}</td><td>${r.name}</td><td>${r.mobile}</td><td><button class="btn small secondary delDistributorBtn">Delete</button></td></tr>`).join('')}</tbody></table>`;
+    box.querySelectorAll('.delDistributorBtn').forEach((btn) => {
+      btn.onclick = async () => {
+        if (!confirm('Delete this distributor?')) return;
+        try {
+          await api(`/distributors/${btn.closest('tr').dataset.id}`, { method: 'DELETE' });
+          loadDistributors();
+        } catch (e) { alert(e.message); }
+      };
+    });
     wrap.querySelector('#meDistributor').innerHTML = rows.map((r) => `<option value="${r.id}">${r.name}</option>`).join('');
     return rows;
   }

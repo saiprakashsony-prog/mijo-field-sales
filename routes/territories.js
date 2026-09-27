@@ -17,4 +17,16 @@ router.post('/', allowRoles('super_admin', 'management'), async (req, res) => {
   res.status(201).json({ id: result.insertId });
 });
 
+router.delete('/:id', allowRoles('super_admin', 'management'), async (req, res) => {
+  try {
+    await pool.query('DELETE FROM territories WHERE id = ?', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) {
+    if (e.code === 'ER_ROW_IS_REFERENCED_2' || e.code === 'ER_ROW_IS_REFERENCED') {
+      return res.status(409).json({ error: 'This territory is already used by a distributor, employee or retailer, so it cannot be deleted.' });
+    }
+    throw e;
+  }
+});
+
 module.exports = router;
