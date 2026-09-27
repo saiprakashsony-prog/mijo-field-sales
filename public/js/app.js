@@ -551,17 +551,34 @@ async function renderMasters() {
     <div>
       <div class="card">
         <p class="section-title">Territories</p>
-        <div class="grid cols-3">
+        <div class="grid cols-2">
           <div class="field"><label>Name</label><input id="mtName" /></div>
           <div class="field"><label>State</label>
             <select id="mtState"><option value="">-- select state --</option>${window.INDIA_STATE_LIST.map((s) => `<option value="${s}">${s}</option>`).join('')}</select>
           </div>
-          <div class="field"><label>District</label>
-            <select id="mtDistrict"><option value="">-- select state first --</option></select>
+        </div>
+        <div class="field"><label>Districts (select one or more)</label>
+          <div id="mtDistrictChecks" class="map-search-results" style="display:block;max-height:180px">
+            <div class="muted" style="padding:8px 10px">Select a state first.</div>
           </div>
         </div>
         <button class="btn small" id="addTerritory">Add Territory</button>
         <div id="territoryList" style="margin-top:10px"></div>
+      </div>
+      <div class="card">
+        <p class="section-title">Mandals</p>
+        <p class="muted">Mandals aren't a fixed nationwide list, so add them yourself per district as you expand — they're what a distributor's coverage gets mapped to.</p>
+        <div class="grid cols-3">
+          <div class="field"><label>State</label>
+            <select id="mmState"><option value="">-- select state --</option>${window.INDIA_STATE_LIST.map((s) => `<option value="${s}">${s}</option>`).join('')}</select>
+          </div>
+          <div class="field"><label>District</label>
+            <select id="mmDistrict"><option value="">-- select state first --</option></select>
+          </div>
+          <div class="field"><label>Mandal Name</label><input id="mmName" /></div>
+        </div>
+        <button class="btn small" id="addMandal">Add Mandal</button>
+        <div id="mandalList" style="margin-top:10px"></div>
       </div>
       <div class="card">
         <p class="section-title">Distributors</p>
@@ -569,6 +586,14 @@ async function renderMasters() {
           <div class="field"><label>Name</label><input id="mdName" /></div>
           <div class="field"><label>Mobile</label><input id="mdMobile" /></div>
           <div class="field"><label>Address</label><input id="mdAddress" /></div>
+        </div>
+        <div class="field"><label>Territory</label>
+          <select id="mdTerritory"><option value="">-- none --</option></select>
+        </div>
+        <div class="field"><label>Mandals to map (select from this territory's districts)</label>
+          <div id="mdMandalChecks" class="map-search-results" style="display:block;max-height:180px">
+            <div class="muted" style="padding:8px 10px">Select a territory first.</div>
+          </div>
         </div>
         <button class="btn small" id="addDistributor">Add Distributor</button>
         <div id="distributorList" style="margin-top:10px"></div>
@@ -638,10 +663,12 @@ async function renderMasters() {
       </div>
     </div>`);
 
+  let territoriesCache = [];
   async function loadTerritories() {
     const rows = await api('/territories');
+    territoriesCache = rows;
     const box = wrap.querySelector('#territoryList');
-    box.innerHTML = `<table><thead><tr><th>Name</th><th>State</th><th>District</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr data-id="${r.id}"><td>${r.name}</td><td>${r.state || ''}</td><td>${r.district || ''}</td><td><button class="btn small secondary delTerritoryBtn">Delete</button></td></tr>`).join('')}</tbody></table>`;
+    box.innerHTML = `<table><thead><tr><th>Name</th><th>State</th><th>Districts</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr data-id="${r.id}"><td>${r.name}</td><td>${(r.districts && r.districts[0]) ? r.districts[0].state : (r.state || '')}</td><td>${(r.districts || []).map((d) => d.district).join(', ')}</td><td><button class="btn small secondary delTerritoryBtn">Delete</button></td></tr>`).join('')}</tbody></table>`;
     box.querySelectorAll('.delTerritoryBtn').forEach((btn) => {
       btn.onclick = async () => {
         if (!confirm('Delete this territory?')) return;
@@ -651,12 +678,13 @@ async function renderMasters() {
         } catch (e) { alert(e.message); }
       };
     });
+    wrap.querySelector('#mdTerritory').innerHTML = '<option value="">-- none --</option>' + rows.map((r) => `<option value="${r.id}">${r.name}</option>`).join('');
     return rows;
   }
   async function loadDistributors() {
     const rows = await api('/distributors');
     const box = wrap.querySelector('#distributorList');
-    box.innerHTML = `<table><thead><tr><th>Code</th><th>Name</th><th>Mobile</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr data-id="${r.id}"><td>${r.code}</td><td>${r.name}</td><td>${r.mobile}</td><td><button class="btn small secondary delDistributorBtn">Delete</button></td></tr>`).join('')}</tbody></table>`;
+    box.innerHTML = `<table><thead><tr><th>Code</th><th>Name</th><th>Mobile</th><th>Territory</th><th>Mandals</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr data-id="${r.id}"><td>${r.code}</td><td>${r.name}</td><td>${r.mobile}</td><td>${r.territory_name || ''}</td><td>${r.mandals || ''}</td><td><button class="btn small secondary delDistributorBtn">Delete</button></td></tr>`).join('')}</tbody></table>`;
     box.querySelectorAll('.delDistributorBtn').forEach((btn) => {
       btn.onclick = async () => {
         if (!confirm('Delete this distributor?')) return;
@@ -730,6 +758,38 @@ async function renderMasters() {
       } catch (e) { alert(e.message); }
     };
   }
+  async function loadMandals() {
+    const rows = await api('/mandals');
+    const box = wrap.querySelector('#mandalList');
+    box.innerHTML = `<table><thead><tr><th>Name</th><th>State</th><th>District</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr data-id="${r.id}"><td>${r.name}</td><td>${r.state}</td><td>${r.district}</td><td><button class="btn small secondary delMandalBtn">Delete</button></td></tr>`).join('')}</tbody></table>`;
+    box.querySelectorAll('.delMandalBtn').forEach((btn) => {
+      btn.onclick = async () => {
+        if (!confirm('Delete this mandal?')) return;
+        try {
+          await api(`/mandals/${btn.closest('tr').dataset.id}`, { method: 'DELETE' });
+          loadMandals();
+        } catch (e) { alert(e.message); }
+      };
+    });
+  }
+  wrap.querySelector('#mmState').onchange = (e) => {
+    const districts = window.INDIA_STATES_DISTRICTS[e.target.value] || [];
+    wrap.querySelector('#mmDistrict').innerHTML = districts.length
+      ? districts.map((d) => `<option value="${d}">${d}</option>`).join('')
+      : '<option value="">-- select state first --</option>';
+  };
+  wrap.querySelector('#addMandal').onclick = async () => {
+    const name = wrap.querySelector('#mmName').value.trim();
+    const state = wrap.querySelector('#mmState').value;
+    const district = wrap.querySelector('#mmDistrict').value;
+    if (!name || !state || !district) { alert('Select a state, district, and enter a mandal name.'); return; }
+    try {
+      await api('/mandals', { method: 'POST', body: JSON.stringify({ name, state, district }) });
+      wrap.querySelector('#mmName').value = '';
+      loadMandals();
+    } catch (e) { alert(e.message); }
+  };
+
   async function loadCategories() {
     const rows = await api('/categories');
     const box = wrap.querySelector('#categoryList');
@@ -854,18 +914,58 @@ async function renderMasters() {
 
   wrap.querySelector('#mtState').onchange = (e) => {
     const districts = window.INDIA_STATES_DISTRICTS[e.target.value] || [];
-    wrap.querySelector('#mtDistrict').innerHTML = districts.length
-      ? districts.map((d) => `<option value="${d}">${d}</option>`).join('')
-      : '<option value="">-- select state first --</option>';
+    const box = wrap.querySelector('#mtDistrictChecks');
+    box.innerHTML = districts.length
+      ? districts.map((d) => `<label style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer"><input type="checkbox" class="mtDistrictCheck" value="${d}" style="width:auto"/> ${d}</label>`).join('')
+      : '<div class="muted" style="padding:8px 10px">Select a state first.</div>';
   };
 
   wrap.querySelector('#addTerritory').onclick = async () => {
-    await api('/territories', { method: 'POST', body: JSON.stringify({ name: wrap.querySelector('#mtName').value, state: wrap.querySelector('#mtState').value, district: wrap.querySelector('#mtDistrict').value }) });
-    loadTerritories();
+    const state = wrap.querySelector('#mtState').value;
+    const checked = [...wrap.querySelectorAll('.mtDistrictCheck:checked')].map((c) => c.value);
+    if (!state || !checked.length) { alert('Select a state and at least one district.'); return; }
+    try {
+      await api('/territories', { method: 'POST', body: JSON.stringify({
+        name: wrap.querySelector('#mtName').value,
+        districts: checked.map((district) => ({ state, district })),
+      }) });
+      wrap.querySelector('#mtName').value = '';
+      wrap.querySelector('#mtState').value = '';
+      wrap.querySelector('#mtDistrictChecks').innerHTML = '<div class="muted" style="padding:8px 10px">Select a state first.</div>';
+      loadTerritories();
+    } catch (e) { alert(e.message); }
   };
+  wrap.querySelector('#mdTerritory').onchange = async (e) => {
+    const box = wrap.querySelector('#mdMandalChecks');
+    const territory = territoriesCache.find((t) => String(t.id) === e.target.value);
+    if (!territory || !territory.districts.length) {
+      box.innerHTML = '<div class="muted" style="padding:8px 10px">Select a territory first.</div>';
+      return;
+    }
+    const districtNames = territory.districts.map((d) => d.district);
+    const mandals = await api(`/mandals?districts=${encodeURIComponent(districtNames.join(','))}`);
+    box.innerHTML = mandals.length
+      ? mandals.map((m) => `<label style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer"><input type="checkbox" class="mdMandalCheck" value="${m.id}" style="width:auto"/> ${m.name} (${m.district})</label>`).join('')
+      : '<div class="muted" style="padding:8px 10px">No mandals added yet for this territory\'s districts — add some under Mandals below, then pick a territory again.</div>';
+  };
+
   wrap.querySelector('#addDistributor').onclick = async () => {
-    await api('/distributors', { method: 'POST', body: JSON.stringify({ name: wrap.querySelector('#mdName').value, mobile: wrap.querySelector('#mdMobile').value, address: wrap.querySelector('#mdAddress').value }) });
-    loadDistributors();
+    const mandalIds = [...wrap.querySelectorAll('.mdMandalCheck:checked')].map((c) => Number(c.value));
+    try {
+      await api('/distributors', { method: 'POST', body: JSON.stringify({
+        name: wrap.querySelector('#mdName').value,
+        mobile: wrap.querySelector('#mdMobile').value,
+        address: wrap.querySelector('#mdAddress').value,
+        territory_id: wrap.querySelector('#mdTerritory').value || null,
+        mandal_ids: mandalIds,
+      }) });
+      wrap.querySelector('#mdName').value = '';
+      wrap.querySelector('#mdMobile').value = '';
+      wrap.querySelector('#mdAddress').value = '';
+      wrap.querySelector('#mdTerritory').value = '';
+      wrap.querySelector('#mdMandalChecks').innerHTML = '<div class="muted" style="padding:8px 10px">Select a territory first.</div>';
+      loadDistributors();
+    } catch (e) { alert(e.message); }
   };
   wrap.querySelector('#addEmployee').onclick = async () => {
     const distId = wrap.querySelector('#meDistributor').value;
@@ -934,6 +1034,7 @@ async function renderMasters() {
   };
 
   await loadTerritories();
+  await loadMandals();
   await loadDistributors();
   await loadEmployees();
   await loadCategories();

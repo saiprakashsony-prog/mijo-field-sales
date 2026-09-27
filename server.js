@@ -12,6 +12,7 @@ app.use('/api/auth', require('./routes/auth'));
 app.use('/api/employees', require('./routes/employees'));
 app.use('/api/distributors', require('./routes/distributors'));
 app.use('/api/territories', require('./routes/territories'));
+app.use('/api/mandals', require('./routes/mandals'));
 app.use('/api/products', require('./routes/products'));
 app.use('/api/categories', require('./routes/categories'));
 app.use('/api/retailers', require('./routes/retailers'));

@@ -10,10 +10,41 @@ CREATE TABLE IF NOT EXISTS categories (
 CREATE TABLE IF NOT EXISTS territories (
   id            INT AUTO_INCREMENT PRIMARY KEY,
   name          VARCHAR(100) NOT NULL,
-  state         VARCHAR(100),
-  district      VARCHAR(100),
+  state         VARCHAR(100),   -- legacy single state/district, kept for old rows; a territory's
+  district      VARCHAR(100),   -- real district list now lives in territory_districts below
   status        ENUM('active','inactive') DEFAULT 'active',
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- A territory can span multiple districts (within one state, in the current UI).
+CREATE TABLE IF NOT EXISTS territory_districts (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  territory_id  INT NOT NULL,
+  state         VARCHAR(100) NOT NULL,
+  district      VARCHAR(100) NOT NULL,
+  FOREIGN KEY (territory_id) REFERENCES territories(id) ON DELETE CASCADE,
+  UNIQUE KEY uniq_territory_district (territory_id, state, district)
+);
+
+-- Mandals (sub-district administrative units) aren't a fixed nationwide list like
+-- states/districts, so this is a master you populate yourself per district as needed —
+-- same pattern as Categories.
+CREATE TABLE IF NOT EXISTS mandals (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  name          VARCHAR(100) NOT NULL,
+  state         VARCHAR(100) NOT NULL,
+  district      VARCHAR(100) NOT NULL,
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_mandal (name, state, district)
+);
+
+-- A distributor's serviceable mandals (chosen from the mandals under their territory's districts).
+CREATE TABLE IF NOT EXISTS distributor_mandals (
+  distributor_id  INT NOT NULL,
+  mandal_id       INT NOT NULL,
+  PRIMARY KEY (distributor_id, mandal_id),
+  FOREIGN KEY (distributor_id) REFERENCES distributors(id) ON DELETE CASCADE,
+  FOREIGN KEY (mandal_id) REFERENCES mandals(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS distributors (
