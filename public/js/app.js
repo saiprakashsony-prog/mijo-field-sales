@@ -578,6 +578,8 @@ async function renderMasters() {
           <div class="field"><label>Mandal Name</label><input id="mmName" /></div>
         </div>
         <button class="btn small" id="addMandal">Add Mandal</button>
+        <button class="btn small secondary" id="importTgApMandals" style="margin-left:8px">Import Telangana &amp; Andhra Pradesh Mandals (1,305)</button>
+        <span id="importMandalsStatus" class="muted" style="margin-left:8px"></span>
         <div id="mandalList" style="margin-top:10px"></div>
       </div>
       <div class="card">
@@ -778,6 +780,16 @@ async function renderMasters() {
       ? districts.map((d) => `<option value="${d}">${d}</option>`).join('')
       : '<option value="">-- select state first --</option>';
   };
+  wrap.querySelector('#importTgApMandals').onclick = async () => {
+    const statusEl = wrap.querySelector('#importMandalsStatus');
+    statusEl.textContent = 'Importing...';
+    try {
+      const result = await api('/mandals/bulk-import-tg-ap', { method: 'POST' });
+      statusEl.textContent = `Done — ${result.newly_inserted} new mandals added (${result.total_in_file - result.newly_inserted} were already there).`;
+      loadMandals();
+    } catch (e) { statusEl.textContent = 'Failed: ' + e.message; }
+  };
+
   wrap.querySelector('#addMandal').onclick = async () => {
     const name = wrap.querySelector('#mmName').value.trim();
     const state = wrap.querySelector('#mmState').value;

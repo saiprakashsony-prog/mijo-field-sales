@@ -1,9 +1,39 @@
 const express = require('express');
+const path = require('path');
 const pool = require('../db');
 const { authRequired, allowRoles } = require('../middleware/auth');
 
 const router = express.Router();
 router.use(authRequired);
+
+// Official Telangana + Andhra Pradesh mandal list (1,305 mandals across 61 districts),
+// bundled at data/mandals-tg-ap.json. INSERT IGNORE makes this safe to click more than once.
+router.post('/bulk-import-tg-ap', allowRoles('super_admin', 'management'), async (req, res) => {
+  const seed = require(path.join(__dirname, '..', 'data', 'mandals-tg-ap.json'));
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    let inserted = 0;
+    const batchSize = 500;
+    for (let i = 0; i < seed.length; i += batchSize) {
+      const batch = seed.slice(i, i + batchSize);
+      const placeholders = batch.map(() => '(?, ?, ?)').join(', ');
+      const values = batch.flatMap((m) => [m.name, m.state, m.district]);
+      const [result] = await conn.query(
+        `INSERT IGNORE INTO mandals (name, state, district) VALUES ${placeholders}`,
+        values
+      );
+      inserted += result.affectedRows;
+    }
+    await conn.commit();
+    res.json({ ok: true, total_in_file: seed.length, newly_inserted: inserted });
+  } catch (e) {
+    await conn.rollback();
+    res.status(500).json({ error: e.message });
+  } finally {
+    conn.release();
+  }
+});
 
 // ?districts=District1,District2 filters to mandals under any of those districts
 // (used when picking mandals for a distributor, scoped to their territory's districts).
