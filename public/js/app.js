@@ -580,7 +580,9 @@ async function renderMasters() {
         <button class="btn small" id="addMandal">Add Mandal</button>
         <button class="btn small secondary" id="importTgApMandals" style="margin-left:8px">Import Telangana &amp; Andhra Pradesh Mandals (1,305)</button>
         <span id="importMandalsStatus" class="muted" style="margin-left:8px"></span>
-        <div id="mandalList" style="margin-top:10px"></div>
+        <p class="muted" id="mandalCount" style="margin-top:10px"></p>
+        <button class="btn small secondary" id="toggleMandalList">Show Mandal List</button>
+        <div id="mandalList" style="margin-top:10px;display:none"></div>
       </div>
       <div class="card">
         <p class="section-title">Distributors</p>
@@ -763,10 +765,10 @@ async function renderMasters() {
       } catch (e) { alert(e.message); }
     };
   }
-  async function loadMandals() {
-    const rows = await api('/mandals');
+  let mandalsCache = [];
+  function renderMandalTable() {
     const box = wrap.querySelector('#mandalList');
-    box.innerHTML = `<table><thead><tr><th>Name</th><th>State</th><th>District</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr data-id="${r.id}"><td>${r.name}</td><td>${r.state}</td><td>${r.district}</td><td><button class="btn small secondary delMandalBtn">Delete</button></td></tr>`).join('')}</tbody></table>`;
+    box.innerHTML = `<table><thead><tr><th>Name</th><th>State</th><th>District</th><th></th></tr></thead><tbody>${mandalsCache.map((r) => `<tr data-id="${r.id}"><td>${r.name}</td><td>${r.state}</td><td>${r.district}</td><td><button class="btn small secondary delMandalBtn">Delete</button></td></tr>`).join('')}</tbody></table>`;
     box.querySelectorAll('.delMandalBtn').forEach((btn) => {
       btn.onclick = async () => {
         if (!confirm('Delete this mandal?')) return;
@@ -777,6 +779,26 @@ async function renderMasters() {
       };
     });
   }
+  async function loadMandals() {
+    mandalsCache = await api('/mandals');
+    wrap.querySelector('#mandalCount').textContent = `${mandalsCache.length.toLocaleString('en-IN')} mandal${mandalsCache.length === 1 ? '' : 's'} added.`;
+    const box = wrap.querySelector('#mandalList');
+    if (box.style.display !== 'none') renderMandalTable(); // list is currently open — keep it in sync
+  }
+  wrap.querySelector('#toggleMandalList').onclick = () => {
+    const box = wrap.querySelector('#mandalList');
+    const btn = wrap.querySelector('#toggleMandalList');
+    const showing = box.style.display !== 'none';
+    if (showing) {
+      box.style.display = 'none';
+      box.innerHTML = '';
+      btn.textContent = 'Show Mandal List';
+    } else {
+      box.style.display = 'block';
+      renderMandalTable();
+      btn.textContent = 'Hide Mandal List';
+    }
+  };
   wrap.querySelector('#mmState').onchange = (e) => {
     const districts = window.INDIA_STATES_DISTRICTS[e.target.value] || [];
     wrap.querySelector('#mmDistrict').innerHTML = districts.length
