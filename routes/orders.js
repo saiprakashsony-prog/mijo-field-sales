@@ -26,12 +26,17 @@ router.get('/', async (req, res) => {
   if (date) { where.push('o.order_date = ?'); params.push(date); }
   if (from && to) { where.push('o.order_date BETWEEN ? AND ?'); params.push(from, to); }
 
-  // Role scoping: a distributor login only sees its own orders; a field employee only sees its own
-  if (req.user.role === 'distributor') { where.push('o.distributor_id = ?'); params.push(req.user.distributor_id); }
+  // Role scoping: a distributor or delivery executive login only sees their distributor's
+  // orders; a field employee only sees its own
+  if (req.user.role === 'distributor' || req.user.role === 'delivery_executive') {
+    where.push('o.distributor_id = ?'); params.push(req.user.distributor_id);
+  }
   if (req.user.role === 'field_employee') { where.push('o.employee_id = ?'); params.push(req.user.employee_id); }
 
   const [rows] = await pool.query(
-    `SELECT o.*, r.name AS retailer_name, r.code AS retailer_code, e.name AS employee_name, d.name AS distributor_name
+    `SELECT o.*, r.name AS retailer_name, r.code AS retailer_code, r.address AS retailer_address,
+            r.gps_lat AS retailer_gps_lat, r.gps_lng AS retailer_gps_lng, r.mobile AS retailer_mobile,
+            e.name AS employee_name, d.name AS distributor_name
      FROM orders o
      JOIN retailers r ON r.id = o.retailer_id
      JOIN employees e ON e.id = o.employee_id
@@ -45,7 +50,9 @@ router.get('/', async (req, res) => {
 
 router.get('/:id', async (req, res) => {
   const [[order]] = await pool.query(
-    `SELECT o.*, r.name AS retailer_name, r.address AS retailer_address, e.name AS employee_name, d.name AS distributor_name
+    `SELECT o.*, r.name AS retailer_name, r.address AS retailer_address,
+            r.gps_lat AS retailer_gps_lat, r.gps_lng AS retailer_gps_lng, r.mobile AS retailer_mobile,
+            e.name AS employee_name, d.name AS distributor_name
      FROM orders o
      JOIN retailers r ON r.id = o.retailer_id
      JOIN employees e ON e.id = o.employee_id
@@ -166,13 +173,18 @@ router.post('/', async (req, res) => {
 });
 
 // Status transitions: distributor moves the order through the dispatch flow (BRD 10)
-router.patch('/:id/status', allowRoles('distributor', 'super_admin', 'management'), async (req, res) => {
+router.patch('/:id/status', allowRoles('distributor', 'delivery_executive', 'super_admin', 'management'), async (req, res) => {
   const { status, remarks, invoice_no, invoice_url, cancel_reason } = req.body;
   const [[order]] = await pool.query('SELECT * FROM orders WHERE id = ?', [req.params.id]);
   if (!order) return res.status(404).json({ error: 'Not found' });
 
-  if (req.user.role === 'distributor' && order.distributor_id !== req.user.distributor_id) {
+  if ((req.user.role === 'distributor' || req.user.role === 'delivery_executive') && order.distributor_id !== req.user.distributor_id) {
     return res.status(403).json({ error: 'Not your order' });
+  }
+  // A delivery executive only handles the physical dispatch/delivery leg — not earlier
+  // warehouse stages, and not cancellations (that stays a distributor/admin decision).
+  if (req.user.role === 'delivery_executive' && !['dispatched', 'delivered'].includes(status)) {
+    return res.status(403).json({ error: 'Delivery executives can only mark an order Dispatched or Delivered' });
   }
 
   if (status === 'cancelled') {

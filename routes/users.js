@@ -16,13 +16,17 @@ router.get('/', async (req, res) => {
   res.json(rows);
 });
 
-// role: super_admin | management | sales_manager | field_employee | distributor
-// for field_employee, pass employee_id; for distributor, pass distributor_id
+// role: super_admin | management | sales_manager | field_employee | distributor | delivery_executive
+// for field_employee, pass employee_id; for distributor or delivery_executive, pass distributor_id
+// (a delivery executive belongs to a distributor, same as the distributor's own login, and only
+// sees/handles that distributor's deliveries)
 router.post('/', async (req, res) => {
   const { name, mobile, password, role, employee_id, distributor_id } = req.body;
   if (!name || !mobile || !password || !role) return res.status(400).json({ error: 'name, mobile, password, role are required' });
   if (role === 'field_employee' && !employee_id) return res.status(400).json({ error: 'employee_id is required for a field_employee login' });
-  if (role === 'distributor' && !distributor_id) return res.status(400).json({ error: 'distributor_id is required for a distributor login' });
+  if ((role === 'distributor' || role === 'delivery_executive') && !distributor_id) {
+    return res.status(400).json({ error: 'distributor_id is required for a distributor or delivery_executive login' });
+  }
 
   const hash = await bcrypt.hash(password, 10);
   try {

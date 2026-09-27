@@ -179,6 +179,7 @@ function renderLogin() {
 const TABS_BY_ROLE = {
   field_employee: [['myroute', 'My Route'], ['newretailer', 'New Retailer'], ['booking', 'Book Order'], ['myorders', 'My Orders'], ['returns', 'Returns']],
   distributor: [['orderbook', 'Order Book'], ['consolidated', 'Consolidated Picking List'], ['returns', 'Returns']],
+  delivery_executive: [['deliveries', 'My Deliveries']],
   sales_manager: [['dashboard', 'Dashboard'], ['orders', 'All Orders'], ['returns', 'Returns'], ['masters', 'Masters']],
   management: [['dashboard', 'Dashboard'], ['orders', 'All Orders'], ['returns', 'Returns'], ['masters', 'Masters']],
   super_admin: [['dashboard', 'Dashboard'], ['orders', 'All Orders'], ['returns', 'Returns'], ['masters', 'Masters']],
@@ -214,6 +215,7 @@ function renderShell() {
     masters: renderMasters,
     returns: renderReturns,
     myroute: renderMyRoute,
+    deliveries: renderDeliveries,
   };
   (renderers[state.tab] || (() => el('<div/>')))().then((node) => main.appendChild(node)).catch((e) => {
     main.appendChild(el(`<div class="card error-msg">${e.message}</div>`));
@@ -230,6 +232,7 @@ function refreshMain() {
     orderbook: renderOrderBook, consolidated: renderConsolidated, dashboard: renderDashboard,
     orders: renderAllOrders, masters: renderMasters, returns: renderReturns,
     myroute: renderMyRoute,
+    deliveries: renderDeliveries,
   };
   renderers[state.tab]().then((node) => main.appendChild(node));
 }
@@ -772,6 +775,53 @@ async function renderConsolidated() {
     </div>`);
 }
 
+// ---------- Delivery Executive: My Deliveries ----------
+async function renderDeliveries() {
+  const DELIVERY_STATUSES = ['accepted', 'picking', 'packing', 'ready_for_dispatch', 'dispatched'];
+  const allOrders = await api('/orders'); // already scoped to this delivery executive's distributor
+  const orders = allOrders.filter((o) => DELIVERY_STATUSES.includes(o.status));
+  const STATUS_NEXT = { ready_for_dispatch: 'dispatched', dispatched: 'delivered' };
+
+  const wrap = el(`
+    <div>
+      <div class="card">
+        <p class="section-title">My Deliveries</p>
+        <p class="muted">Orders accepted by the distributor and not yet delivered. Tap an address to get turn-by-turn directions.</p>
+      </div>
+      ${orders.length ? orders.map((o) => `
+        <div class="card" data-id="${o.id}">
+          <div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:8px">
+            <div>
+              <p class="section-title" style="margin-bottom:4px">${o.order_no}</p>
+              <p style="margin:0;font-weight:600">${o.retailer_name} (${o.retailer_code})</p>
+              ${o.retailer_gps_lat && o.retailer_gps_lng
+                ? `<a href="https://www.google.com/maps/dir/?api=1&destination=${o.retailer_gps_lat},${o.retailer_gps_lng}" target="_blank" rel="noopener" style="color:var(--brand)">${o.retailer_address || 'Open in Google Maps'} ↗</a>`
+                : `<span class="muted">${o.retailer_address || 'No address on file'} (no GPS pin saved)</span>`}
+              ${o.retailer_mobile ? `<br/><a href="tel:${o.retailer_mobile}" style="color:var(--brand)">Call ${o.retailer_mobile}</a>` : ''}
+            </div>
+            <div style="text-align:right">
+              <span class="badge ${o.status}">${o.status.replace(/_/g, ' ')}</span>
+              <p style="margin:6px 0 0;font-weight:600">${fmtMoney(o.total_amount)}</p>
+            </div>
+          </div>
+          ${STATUS_NEXT[o.status] ? `<button class="btn small deliveryAdvanceBtn" style="margin-top:10px" data-next="${STATUS_NEXT[o.status]}">Mark ${STATUS_NEXT[o.status].replace(/_/g, ' ')}</button>` : `<p class="muted" style="margin-top:8px">Waiting on the distributor to mark this Ready for Dispatch.</p>`}
+        </div>
+      `).join('') : '<div class="card"><p class="muted">No deliveries pending right now.</p></div>'}
+    </div>`);
+
+  wrap.querySelectorAll('.deliveryAdvanceBtn').forEach((btn) => {
+    btn.onclick = async () => {
+      const card = btn.closest('[data-id]');
+      try {
+        await api(`/orders/${card.dataset.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: btn.dataset.next }) });
+        refreshMain();
+      } catch (e) { alert(e.message); }
+    };
+  });
+
+  return wrap;
+}
+
 // ---------- Management: Dashboard ----------
 async function renderDashboard() {
   const date = todayISO();
@@ -1128,6 +1178,7 @@ async function renderMasters() {
             <select id="ulRole">
               <option value="field_employee">Field Employee</option>
               <option value="distributor">Distributor</option>
+              <option value="delivery_executive">Delivery Executive</option>
               <option value="sales_manager">Sales Manager</option>
               <option value="management">Management</option>
               <option value="super_admin">Super Admin</option>
@@ -1754,7 +1805,7 @@ async function renderMasters() {
   function syncLoginRoleFields() {
     const role = wrap.querySelector('#ulRole').value;
     wrap.querySelector('#ulEmployeeWrap').style.display = role === 'field_employee' ? 'block' : 'none';
-    wrap.querySelector('#ulDistributorWrap').style.display = role === 'distributor' ? 'block' : 'none';
+    wrap.querySelector('#ulDistributorWrap').style.display = (role === 'distributor' || role === 'delivery_executive') ? 'block' : 'none';
   }
   wrap.querySelector('#ulRole').onchange = syncLoginRoleFields;
   syncLoginRoleFields();
@@ -1764,7 +1815,7 @@ async function renderMasters() {
     errBox.textContent = '';
     const role = wrap.querySelector('#ulRole').value;
     if (role === 'field_employee' && !wrap.querySelector('#ulEmployee').value) { errBox.textContent = 'Select which employee this login belongs to.'; return; }
-    if (role === 'distributor' && !wrap.querySelector('#ulDistributor').value) { errBox.textContent = 'Select which distributor this login belongs to.'; return; }
+    if ((role === 'distributor' || role === 'delivery_executive') && !wrap.querySelector('#ulDistributor').value) { errBox.textContent = 'Select which distributor this login belongs to.'; return; }
     try {
       await api('/users', { method: 'POST', body: JSON.stringify({
         name: wrap.querySelector('#ulName').value,
@@ -1772,7 +1823,7 @@ async function renderMasters() {
         password: wrap.querySelector('#ulPassword').value,
         role,
         employee_id: role === 'field_employee' ? wrap.querySelector('#ulEmployee').value : null,
-        distributor_id: role === 'distributor' ? wrap.querySelector('#ulDistributor').value : null,
+        distributor_id: (role === 'distributor' || role === 'delivery_executive') ? wrap.querySelector('#ulDistributor').value : null,
       }) });
       wrap.querySelector('#ulName').value = '';
       wrap.querySelector('#ulMobile').value = '';

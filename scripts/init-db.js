@@ -54,6 +54,11 @@ async function migrate(conn) {
   // Credit limits & overdue controls
   await addColumnIfMissing('retailers', 'credit_limit', 'credit_limit DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER status');
   await addColumnIfMissing('retailers', 'payment_terms_days', 'payment_terms_days INT NOT NULL DEFAULT 0 AFTER credit_limit');
+
+  // Delivery executive role — safe to re-run every time (just resets the same ENUM definition)
+  await conn.query(
+    `ALTER TABLE users MODIFY COLUMN role ENUM('super_admin','management','sales_manager','field_employee','distributor','delivery_executive') NOT NULL`
+  );
 }
 
 async function run() {

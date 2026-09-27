@@ -174,7 +174,7 @@ CREATE TABLE IF NOT EXISTS users (
   mobile         VARCHAR(20) UNIQUE NOT NULL,
   email          VARCHAR(150),
   password_hash  VARCHAR(255) NOT NULL,
-  role           ENUM('super_admin','management','sales_manager','field_employee','distributor') NOT NULL,
+  role           ENUM('super_admin','management','sales_manager','field_employee','distributor','delivery_executive') NOT NULL,
   employee_id    INT NULL,
   distributor_id INT NULL,
   status         ENUM('active','inactive') DEFAULT 'active',
