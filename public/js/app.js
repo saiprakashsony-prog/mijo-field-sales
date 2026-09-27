@@ -157,9 +157,16 @@ async function renderNewRetailer() {
       </div>
       <div class="field"><label>Address *</label><textarea id="raddress" rows="2"></textarea></div>
       <div class="field">
-        <label>GPS Location * (captured automatically, required)</label>
-        <div id="gpsStatus" class="muted">Not captured yet.</div>
-        <button class="btn secondary small" id="captureGps" style="margin-top:6px">Capture GPS Location</button>
+        <label>Shop Location * (search, click the map, or drag the pin to the exact spot)</label>
+        <div class="map-search-row">
+          <input id="mapSearchInput" placeholder="Search for the shop or area name..." />
+          <button class="btn secondary small" id="mapSearchBtn">Search</button>
+          <button class="btn secondary small" id="useMyLocationBtn">Use My Location</button>
+        </div>
+        <div id="mapSearchResults" class="map-search-results" style="display:none"></div>
+        <div id="retailerMap"></div>
+        <div id="gpsStatus" class="muted">Not captured yet — search, click the map, or use your current location.</div>
+        <div id="deviceLocStatus" class="muted">Checking your current location for the 100m proximity check...</div>
       </div>
       <div id="dupWarning"></div>
       <button class="btn" id="saveRetailer" style="margin-top:10px">Save Retailer</button>
@@ -168,40 +175,149 @@ async function renderNewRetailer() {
     </div>`);
 
   let gps = null;
-  wrap.querySelector('#captureGps').onclick = () => {
+  let map, marker;
+  let deviceLoc = null; // the employee's actual current device GPS, for the 100m proximity check
+  const GEOFENCE_METERS = 100;
+  const DEFAULT_CENTER = [17.3850, 78.4867]; // Hyderabad — used until a location is picked
+
+  function haversineMeters(lat1, lng1, lat2, lng2) {
+    const R = 6371000;
+    const toRad = (d) => (d * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+  }
+
+  function refreshDeviceLocation() {
+    const statusEl = wrap.querySelector('#deviceLocStatus');
+    if (!navigator.geolocation) {
+      statusEl.textContent = 'Your browser does not support location access — the 100m proximity check cannot run, so saving will be blocked.';
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        deviceLoc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        statusEl.textContent = `Your current location is confirmed (±${Math.round(pos.coords.accuracy)}m). You must place the pin within ${GEOFENCE_METERS}m of here to save.`;
+        checkGeofence();
+      },
+      () => {
+        statusEl.textContent = 'Could not confirm your current location — enable location access in your browser, then reload this tab. Saving is blocked until this succeeds.';
+      },
+      { enableHighAccuracy: true, timeout: 15000 }
+    );
+  }
+  refreshDeviceLocation();
+
+  function checkGeofence() {
+    const geoBox = wrap.querySelector('#dupWarning');
+    if (!gps || !deviceLoc) return true; // nothing to compare yet — save button itself still blocks below
+    const dist = Math.round(haversineMeters(gps.lat, gps.lng, deviceLoc.lat, deviceLoc.lng));
+    const existing = geoBox.querySelector('.geofence-warning');
+    if (existing) existing.remove();
+    if (dist > GEOFENCE_METERS) {
+      geoBox.insertAdjacentHTML('afterbegin', `<div class="card geofence-warning" style="border-color:var(--danger);background:#fef2f2"><b>Too far from your current location:</b> the pin is ${dist}m away, but it must be within ${GEOFENCE_METERS}m. Move closer, or adjust the pin to your actual position.</div>`);
+      return false;
+    }
+    return true;
+  }
+
+  async function checkDuplicates() {
+    if (!gps) return;
+    try {
+      const dup = await api('/retailers/check-duplicate', {
+        method: 'POST',
+        body: JSON.stringify({
+          mobile: wrap.querySelector('#rmobile').value.trim(),
+          gstin: wrap.querySelector('#rgstin').value.trim(),
+          name: wrap.querySelector('#rname').value.trim(),
+          gps_lat: gps.lat, gps_lng: gps.lng,
+        }),
+      });
+      const box = wrap.querySelector('#dupWarning');
+      if (dup.possible_duplicates.length) {
+        box.innerHTML = `<div class="card" style="border-color:#f59e0b;background:#fffbeb"><b>Possible duplicate retailer(s) found:</b><ul>${dup.possible_duplicates.map((d) => `<li>${d.name} (${d.code}) — matched on ${d.matched_on}${d.distance_m != null ? `, ${d.distance_m}m away` : ''}</li>`).join('')}</ul></div>`;
+      } else { box.innerHTML = ''; }
+    } catch {}
+  }
+
+  function setLocation(lat, lng, source) {
+    gps = { lat, lng };
+    if (marker) marker.setLatLng([lat, lng]);
+    wrap.querySelector('#gpsStatus').textContent = `Captured (${source}): ${lat.toFixed(6)}, ${lng.toFixed(6)} — drag the pin to fine-tune.`;
+    checkGeofence();
+    checkDuplicates();
+  }
+
+  // Leaflet needs the container to already be in the DOM with real size, so this
+  // runs after the caller has appended `wrap` (see the setTimeout note below).
+  function initMap() {
+    map = L.map('retailerMap').setView(DEFAULT_CENTER, 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 19,
+    }).addTo(map);
+    marker = L.marker(DEFAULT_CENTER, { draggable: true }).addTo(map);
+    marker.on('dragend', () => {
+      const pos = marker.getLatLng();
+      setLocation(pos.lat, pos.lng, 'dragged pin');
+    });
+    map.on('click', (e) => {
+      map.setView(e.latlng, map.getZoom());
+      setLocation(e.latlng.lat, e.latlng.lng, 'map click');
+    });
+  }
+  setTimeout(initMap, 0);
+
+  wrap.querySelector('#useMyLocationBtn').onclick = () => {
     const statusEl = wrap.querySelector('#gpsStatus');
-    statusEl.textContent = 'Capturing...';
+    statusEl.textContent = 'Getting your current location...';
     if (!navigator.geolocation) { statusEl.textContent = 'Geolocation not supported by this browser.'; return; }
     navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        gps = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        statusEl.textContent = `Captured: ${gps.lat.toFixed(6)}, ${gps.lng.toFixed(6)} (±${Math.round(pos.coords.accuracy)}m)`;
-        try {
-          const dup = await api('/retailers/check-duplicate', {
-            method: 'POST',
-            body: JSON.stringify({
-              mobile: wrap.querySelector('#rmobile').value.trim(),
-              gstin: wrap.querySelector('#rgstin').value.trim(),
-              name: wrap.querySelector('#rname').value.trim(),
-              gps_lat: gps.lat, gps_lng: gps.lng,
-            }),
-          });
-          const box = wrap.querySelector('#dupWarning');
-          if (dup.possible_duplicates.length) {
-            box.innerHTML = `<div class="card" style="border-color:#f59e0b;background:#fffbeb"><b>Possible duplicate retailer(s) found:</b><ul>${dup.possible_duplicates.map((d) => `<li>${d.name} (${d.code}) — matched on ${d.matched_on}${d.distance_m != null ? `, ${d.distance_m}m away` : ''}</li>`).join('')}</ul></div>`;
-          } else { box.innerHTML = ''; }
-        } catch {}
+      (pos) => {
+        map.setView([pos.coords.latitude, pos.coords.longitude], 17);
+        setLocation(pos.coords.latitude, pos.coords.longitude, `your location, ±${Math.round(pos.coords.accuracy)}m`);
       },
-      (err) => { statusEl.textContent = 'Could not get location: ' + err.message; },
+      (err) => { statusEl.textContent = 'Could not get your location: ' + err.message; },
       { enableHighAccuracy: true, timeout: 15000 }
     );
   };
+
+  async function runSearch() {
+    const q = wrap.querySelector('#mapSearchInput').value.trim();
+    const resultsBox = wrap.querySelector('#mapSearchResults');
+    if (!q) return;
+    resultsBox.style.display = 'block';
+    resultsBox.innerHTML = '<div class="muted">Searching...</div>';
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=6&countrycodes=in&q=${encodeURIComponent(q)}`);
+      const results = await res.json();
+      if (!results.length) { resultsBox.innerHTML = '<div class="muted">No results — try clicking the map directly instead.</div>'; return; }
+      resultsBox.innerHTML = '';
+      results.forEach((r) => {
+        const item = el(`<div>${r.display_name}</div>`);
+        item.onclick = () => {
+          const lat = Number(r.lat), lng = Number(r.lon);
+          map.setView([lat, lng], 17);
+          setLocation(lat, lng, 'search result');
+          resultsBox.style.display = 'none';
+        };
+        resultsBox.appendChild(item);
+      });
+    } catch {
+      resultsBox.innerHTML = '<div class="muted">Search failed — try clicking the map directly instead.</div>';
+    }
+  }
+  wrap.querySelector('#mapSearchBtn').onclick = runSearch;
+  wrap.querySelector('#mapSearchInput').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); runSearch(); } };
 
   wrap.querySelector('#saveRetailer').onclick = async () => {
     const errBox = wrap.querySelector('#rErr');
     const okBox = wrap.querySelector('#rOk');
     errBox.textContent = ''; okBox.textContent = '';
-    if (!gps) { errBox.textContent = 'Please capture GPS location before saving.'; return; }
+    if (!gps) { errBox.textContent = 'Please set the shop location on the map before saving.'; return; }
+    if (!deviceLoc) { errBox.textContent = 'Your current location could not be confirmed, so this cannot be saved yet — enable location access and wait for confirmation above, then try again.'; return; }
+    if (!checkGeofence()) { errBox.textContent = 'The pin is too far from your current location. Move closer or adjust the pin, then save again.'; return; }
     try {
       const payload = {
         name: wrap.querySelector('#rname').value.trim(),
@@ -213,6 +329,7 @@ async function renderNewRetailer() {
         gstin: wrap.querySelector('#rgstin').value.trim() || null,
         shop_type: wrap.querySelector('#rshoptype').value,
         gps_lat: gps.lat, gps_lng: gps.lng,
+        device_lat: deviceLoc.lat, device_lng: deviceLoc.lng,
         distributor_id: wrap.querySelector('#rdistributor').value,
       };
       const result = await api('/retailers', { method: 'POST', body: JSON.stringify(payload) });

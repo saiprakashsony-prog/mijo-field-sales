@@ -101,4 +101,11 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: upp
 .login-box { width: 340px; }
 .error-msg { color: var(--danger); font-size: 13px; margin-top: 8px; }
 .line-item { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 8px; align-items: end; margin-bottom: 8px; }
+.map-search-row { display: flex; gap: 8px; margin-bottom: 8px; }
+.map-search-row input { flex: 1; }
+#retailerMap { height: 320px; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 8px; }
+.map-search-results { max-height: 160px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 8px; }
+.map-search-results div { padding: 8px 10px; font-size: 13px; cursor: pointer; border-bottom: 1px solid var(--border); }
+.map-search-results div:last-child { border-bottom: none; }
+.map-search-results div:hover { background: var(--bg); }
 .total-row { text-align: right; font-size: 16px; font-weight: 700; margin-top: 10px; }
