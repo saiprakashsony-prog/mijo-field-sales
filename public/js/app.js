@@ -428,8 +428,12 @@ async function renderMasters() {
         <p class="section-title">Territories</p>
         <div class="grid cols-3">
           <div class="field"><label>Name</label><input id="mtName" /></div>
-          <div class="field"><label>State</label><input id="mtState" /></div>
-          <div class="field"><label>District</label><input id="mtDistrict" /></div>
+          <div class="field"><label>State</label>
+            <select id="mtState"><option value="">-- select state --</option>${window.INDIA_STATE_LIST.map((s) => `<option value="${s}">${s}</option>`).join('')}</select>
+          </div>
+          <div class="field"><label>District</label>
+            <select id="mtDistrict"><option value="">-- select state first --</option></select>
+          </div>
         </div>
         <button class="btn small" id="addTerritory">Add Territory</button>
         <div id="territoryList" style="margin-top:10px"></div>
@@ -515,6 +519,13 @@ async function renderMasters() {
     wrap.querySelector('#productList').innerHTML = `<table><thead><tr><th>SKU</th><th>Name</th><th>MRP</th><th>Dist. Rate</th><th>GST%</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${r.sku_code}</td><td>${r.name}</td><td>${fmtMoney(r.mrp)}</td><td>${fmtMoney(r.distributor_rate)}</td><td>${r.gst_pct}</td></tr>`).join('')}</tbody></table>`;
   }
 
+  wrap.querySelector('#mtState').onchange = (e) => {
+    const districts = window.INDIA_STATES_DISTRICTS[e.target.value] || [];
+    wrap.querySelector('#mtDistrict').innerHTML = districts.length
+      ? districts.map((d) => `<option value="${d}">${d}</option>`).join('')
+      : '<option value="">-- select state first --</option>';
+  };
+
   wrap.querySelector('#addTerritory').onclick = async () => {
     await api('/territories', { method: 'POST', body: JSON.stringify({ name: wrap.querySelector('#mtName').value, state: wrap.querySelector('#mtState').value, district: wrap.querySelector('#mtDistrict').value }) });
     loadTerritories();
@@ -538,7 +549,20 @@ async function renderMasters() {
 
   async function loadLogins() {
     const rows = await api('/users');
-    wrap.querySelector('#loginList').innerHTML = `<table><thead><tr><th>Name</th><th>Mobile</th><th>Role</th><th>Linked To</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${r.name}</td><td>${r.mobile}</td><td>${r.role.replace(/_/g, ' ')}</td><td>${r.employee_name || r.distributor_name || ''}</td></tr>`).join('')}</tbody></table>`;
+    const box = wrap.querySelector('#loginList');
+    box.innerHTML = `<table><thead><tr><th>Name</th><th>Mobile</th><th>Role</th><th>Linked To</th><th>Status</th><th></th></tr></thead>
+      <tbody>${rows.map((r) => `<tr data-id="${r.id}">
+        <td>${r.name}</td><td>${r.mobile}</td><td>${r.role.replace(/_/g, ' ')}</td><td>${r.employee_name || r.distributor_name || ''}</td>
+        <td><span class="badge ${r.status === 'active' ? 'delivered' : 'cancelled'}">${r.status}</span></td>
+        <td>${r.status === 'active' ? '<button class="btn small secondary toggleLoginBtn" data-next="inactive">Deactivate</button>' : '<button class="btn small secondary toggleLoginBtn" data-next="active">Reactivate</button>'}</td>
+      </tr>`).join('')}</tbody></table>`;
+    box.querySelectorAll('.toggleLoginBtn').forEach((btn) => {
+      btn.onclick = async () => {
+        const tr = btn.closest('tr');
+        await api(`/users/${tr.dataset.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: btn.dataset.next }) });
+        loadLogins();
+      };
+    });
   }
   async function loadEmployeeOptions() {
     const rows = await api('/employees');
