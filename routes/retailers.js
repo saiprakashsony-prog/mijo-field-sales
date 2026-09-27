@@ -158,6 +158,45 @@ async function computeCreditStatus(conn, retailerId) {
   };
 }
 
+// Bulk version of the credit-status computation for every retailer in one query set,
+// instead of one request per retailer (which gets slow as the retailer list grows).
+// Mirrors computeCreditStatus's logic exactly — see the note above it for the definitions.
+router.get('/credit-summary', async (req, res) => {
+  const [rows] = await pool.query(
+    `SELECT r.id, r.name, r.code, r.credit_limit, r.payment_terms_days, d.name AS distributor_name,
+            COALESCE(billed.total_billed, 0) AS total_billed,
+            COALESCE(paid.total_paid, 0) AS total_paid,
+            oldest.oldest_billed_date
+     FROM retailers r
+     LEFT JOIN distributors d ON d.id = r.distributor_id
+     LEFT JOIN (
+       SELECT retailer_id, SUM(total_amount) AS total_billed FROM orders
+       WHERE status IN ('dispatched','delivered') GROUP BY retailer_id
+     ) billed ON billed.retailer_id = r.id
+     LEFT JOIN (
+       SELECT retailer_id, SUM(amount) AS total_paid FROM payments GROUP BY retailer_id
+     ) paid ON paid.retailer_id = r.id
+     LEFT JOIN (
+       SELECT retailer_id, MIN(order_date) AS oldest_billed_date FROM orders
+       WHERE status IN ('dispatched','delivered') GROUP BY retailer_id
+     ) oldest ON oldest.retailer_id = r.id
+     ORDER BY r.name`
+  );
+  const today = new Date().toISOString().slice(0, 10);
+  res.json(rows.map((r) => {
+    const outstanding = Math.max(0, Math.round((Number(r.total_billed) - Number(r.total_paid)) * 100) / 100);
+    const dueDate = r.oldest_billed_date
+      ? new Date(new Date(r.oldest_billed_date).getTime() + r.payment_terms_days * 86400000).toISOString().slice(0, 10)
+      : null;
+    const isOverdue = outstanding > 0 && !!dueDate && dueDate < today;
+    return {
+      id: r.id, name: r.name, code: r.code, distributor_name: r.distributor_name,
+      credit_limit: Number(r.credit_limit), payment_terms_days: r.payment_terms_days,
+      outstanding_balance: outstanding, is_overdue: isOverdue, oldest_overdue_date: isOverdue ? r.oldest_billed_date : null,
+    };
+  }));
+});
+
 router.get('/:id/credit-status', async (req, res) => {
   const status = await computeCreditStatus(pool, req.params.id);
   if (!status) return res.status(404).json({ error: 'Not found' });

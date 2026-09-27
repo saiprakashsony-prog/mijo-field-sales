@@ -980,6 +980,7 @@ async function renderMasters() {
       </div>
     </div>`);
 
+  const loadedSections = new Set();
   function showMastersSection(id) {
     state.mastersSubTab = id;
     wrap.querySelectorAll('.master-section').forEach((s) => { s.style.display = s.dataset.section === id ? 'block' : 'none'; });
@@ -988,6 +989,14 @@ async function renderMasters() {
       b.style.color = active ? 'var(--brand)' : 'var(--muted)';
       b.style.borderBottomColor = active ? 'var(--brand)' : 'transparent';
     });
+    // Credit is the one section with no other tab depending on its data, so it's safe to
+    // defer until actually opened — keeps the initial Masters load fast regardless of how
+    // many retailers exist.
+    if (id === 'credit' && !loadedSections.has('credit')) {
+      loadedSections.add('credit');
+      loadCreditList();
+      loadPaymentHistory();
+    }
   }
   wrap.querySelectorAll('[data-section-btn]').forEach((btn) => {
     btn.onclick = () => showMastersSection(btn.dataset.sectionBtn);
@@ -1151,25 +1160,19 @@ async function renderMasters() {
     } catch (e) { alert(e.message); }
   };
 
-  let retailersCache = [];
   async function loadCreditList() {
-    retailersCache = await api('/retailers');
     const box = wrap.querySelector('#creditList');
     box.innerHTML = '<p class="muted">Loading credit status...</p>';
-    const statuses = await Promise.all(retailersCache.map((r) => api(`/retailers/${r.id}/credit-status`).catch(() => null)));
+    const rows = await api('/retailers/credit-summary'); // one bulk query, not one request per retailer
     box.innerHTML = `<table><thead><tr><th>Retailer</th><th>Distributor</th><th>Credit Limit</th><th>Terms (days)</th><th>Outstanding</th><th>Status</th><th></th></tr></thead>
-      <tbody>${retailersCache.map((r, i) => {
-        const s = statuses[i];
-        const overdue = s && s.is_overdue;
-        return `<tr data-id="${r.id}">
+      <tbody>${rows.map((r) => `<tr data-id="${r.id}">
           <td>${r.name} (${r.code})</td><td>${r.distributor_name || ''}</td>
-          <td><input class="crLimit" type="number" step="0.01" value="${s ? s.credit_limit : 0}" style="width:100px" /></td>
-          <td><input class="crTerms" type="number" min="0" value="${s ? s.payment_terms_days : 0}" style="width:70px" /></td>
-          <td>${s ? fmtMoney(s.outstanding_balance) : '—'}</td>
-          <td>${overdue ? `<span class="badge cancelled">Overdue since ${s.oldest_overdue_date}</span>` : '<span class="badge delivered">OK</span>'}</td>
+          <td><input class="crLimit" type="number" step="0.01" value="${r.credit_limit}" style="width:100px" /></td>
+          <td><input class="crTerms" type="number" min="0" value="${r.payment_terms_days}" style="width:70px" /></td>
+          <td>${fmtMoney(r.outstanding_balance)}</td>
+          <td>${r.is_overdue ? `<span class="badge cancelled">Overdue since ${r.oldest_overdue_date}</span>` : '<span class="badge delivered">OK</span>'}</td>
           <td><button class="btn small secondary saveCreditBtn">Save</button></td>
-        </tr>`;
-      }).join('')}</tbody></table>`;
+        </tr>`).join('')}</tbody></table>`;
     box.querySelectorAll('.saveCreditBtn').forEach((btn) => {
       btn.onclick = async () => {
         const tr = btn.closest('tr');
@@ -1182,7 +1185,7 @@ async function renderMasters() {
         } catch (e) { alert(e.message); }
       };
     });
-    wrap.querySelector('#pmtRetailer').innerHTML = retailersCache.map((r) => `<option value="${r.id}">${r.name} (${r.code})</option>`).join('');
+    wrap.querySelector('#pmtRetailer').innerHTML = rows.map((r) => `<option value="${r.id}">${r.name} (${r.code})</option>`).join('');
   }
 
   async function loadPaymentHistory() {
@@ -1559,8 +1562,6 @@ async function renderMasters() {
   await loadDistributorOptions();
   await loadSchemeFormOptions();
   await loadSchemes();
-  await loadCreditList();
-  await loadPaymentHistory();
   await loadLogins();
   return wrap;
 }
