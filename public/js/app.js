@@ -535,7 +535,83 @@ async function renderDashboard() {
         <table><thead><tr><th>Status</th><th>Count</th><th>Value</th></tr></thead>
         <tbody>${d.byStatus.map((r) => `<tr><td><span class="badge ${r.status}">${r.status.replace(/_/g, ' ')}</span></td><td>${r.cnt}</td><td>${fmtMoney(r.value)}</td></tr>`).join('')}</tbody></table>
       </div>
+
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <p class="section-title" style="margin:0">Performance — <span id="perfRangeLabel"></span></p>
+          <select id="perfDays">
+            <option value="7">Last 7 days</option>
+            <option value="30" selected>Last 30 days</option>
+            <option value="90">Last 90 days</option>
+          </select>
+        </div>
+      </div>
+      <div class="grid cols-2">
+        <div class="card">
+          <p class="section-title">Fast Moving SKUs (by quantity)</p>
+          <div id="perfFastSkus"></div>
+        </div>
+        <div class="card">
+          <p class="section-title">Best Performing Territories</p>
+          <div id="perfTerritories"></div>
+        </div>
+      </div>
+      <div class="grid cols-2">
+        <div class="card">
+          <p class="section-title">Top Sales Employees</p>
+          <div id="perfEmployees"></div>
+        </div>
+        <div class="card">
+          <p class="section-title">Top Distributors</p>
+          <div id="perfDistributors"></div>
+        </div>
+      </div>
+      <div class="card">
+        <p class="section-title">Discount / Scheme Performance</p>
+        <div id="perfScheme"></div>
+      </div>
     </div>`);
+
+  async function loadPerformance(days) {
+    const p = await api(`/dashboard/performance?days=${days}`);
+    wrap.querySelector('#perfRangeLabel').textContent = `${p.from} to ${p.to}`;
+
+    wrap.querySelector('#perfFastSkus').innerHTML = p.fastMovingSkus.length
+      ? `<table><thead><tr><th>SKU</th><th>Category</th><th>Qty Sold</th><th>Value</th><th>Orders</th></tr></thead>
+         <tbody>${p.fastMovingSkus.map((r) => `<tr><td>${r.name} (${r.sku_code})</td><td>${r.category || ''}</td><td>${r.total_qty}</td><td>${fmtMoney(r.total_value)}</td><td>${r.order_count}</td></tr>`).join('')}</tbody></table>`
+      : '<p class="muted">No orders in this period yet.</p>';
+
+    wrap.querySelector('#perfTerritories').innerHTML = p.byTerritory.length
+      ? `<table><thead><tr><th>Territory</th><th>Orders</th><th>Retailers</th><th>Value</th></tr></thead>
+         <tbody>${p.byTerritory.map((r) => `<tr><td>${r.name}</td><td>${r.order_count}</td><td>${r.retailer_count}</td><td>${fmtMoney(r.order_value)}</td></tr>`).join('')}</tbody></table>`
+      : '<p class="muted">No territories yet.</p>';
+
+    wrap.querySelector('#perfEmployees').innerHTML = p.topEmployees.length
+      ? `<table><thead><tr><th>Employee</th><th>Orders</th><th>Retailers</th><th>Value</th></tr></thead>
+         <tbody>${p.topEmployees.map((r) => `<tr><td>${r.name} (${r.code})</td><td>${r.order_count}</td><td>${r.retailer_count}</td><td>${fmtMoney(r.order_value)}</td></tr>`).join('')}</tbody></table>`
+      : '<p class="muted">No employees yet.</p>';
+
+    wrap.querySelector('#perfDistributors').innerHTML = p.topDistributors.length
+      ? `<table><thead><tr><th>Distributor</th><th>Orders</th><th>Value</th></tr></thead>
+         <tbody>${p.topDistributors.map((r) => `<tr><td>${r.name} (${r.code})</td><td>${r.order_count}</td><td>${fmtMoney(r.order_value)}</td></tr>`).join('')}</tbody></table>`
+      : '<p class="muted">No distributors yet.</p>';
+
+    const s = p.schemePerformance;
+    wrap.querySelector('#perfScheme').innerHTML = `
+      <div class="grid cols-3" style="margin-bottom:12px">
+        <div class="kpi"><div class="value">${fmtMoney(s.total_discount)}</div><div class="label">Total Discount Given</div></div>
+        <div class="kpi"><div class="value">${s.orders_with_discount}</div><div class="label">Orders with Discount</div></div>
+        <div class="kpi"><div class="value">${s.total_orders ? Math.round((s.orders_with_discount / s.total_orders) * 100) : 0}%</div><div class="label">Orders Using a Scheme</div></div>
+      </div>
+      ${s.bySku.length
+        ? `<table><thead><tr><th>SKU</th><th>Discount Given</th><th>Orders</th></tr></thead><tbody>${s.bySku.map((r) => `<tr><td>${r.name} (${r.sku_code})</td><td>${fmtMoney(r.total_discount)}</td><td>${r.order_count}</td></tr>`).join('')}</tbody></table>`
+        : '<p class="muted">No discounts recorded in this period yet — order booking doesn\'t currently have a discount field, so this fills in once that\'s added.</p>'}
+    `;
+  }
+
+  wrap.querySelector('#perfDays').onchange = (e) => loadPerformance(e.target.value);
+  await loadPerformance(30);
+
   return wrap;
 }
 
