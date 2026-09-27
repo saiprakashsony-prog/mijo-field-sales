@@ -86,11 +86,16 @@ router.post('/', async (req, res) => {
     // (MRP marked down by retailer_margin_pct) with no GST added on top. gst_amt is
     // stored purely as the informational tax portion embedded within that price, for
     // invoice/reporting display — it never changes what's actually charged.
+    // A line can be ordered as full cartons, loose packs, or both — qty (the base unit
+    // pricing runs on) is always resolved to total packs: carton_qty * units_per_carton + pack_qty.
     let total = 0;
     const computedLines = lines.map((l) => {
       const p = productMap[l.product_id];
       if (!p) throw new Error(`Product ${l.product_id} not found`);
-      const qty = Number(l.qty);
+      const cartonQty = Number(l.carton_qty || 0);
+      const packQty = Number(l.pack_qty != null ? l.pack_qty : l.qty || 0); // l.qty kept for backward compatibility
+      const unitsPerCarton = Number(p.units_per_carton) || 1;
+      const qty = cartonQty * unitsPerCarton + packQty;
       if (!qty || qty <= 0) throw new Error(`Invalid quantity for ${p.name}`);
       const retailerPrice = Math.round(Number(p.mrp) * (1 - Number(p.retailer_margin_pct) / 100) * 100) / 100;
       const rate = retailerPrice;
@@ -99,7 +104,7 @@ router.post('/', async (req, res) => {
       const gstPct = Number(p.gst_pct);
       const gst = Math.round((net - net / (1 + gstPct / 100)) * 100) / 100; // embedded tax, informational only
       total += net;
-      return { product_id: p.id, qty, rate, discount_amt: discount, gst_amt: gst, net_amount: net };
+      return { product_id: p.id, qty, carton_qty: cartonQty, pack_qty: packQty, rate, discount_amt: discount, gst_amt: gst, net_amount: net };
     });
 
     const orderNo = genOrderNo();
@@ -112,9 +117,9 @@ router.post('/', async (req, res) => {
 
     for (const cl of computedLines) {
       await conn.query(
-        `INSERT INTO order_lines (order_id, product_id, qty, rate, discount_amt, gst_amt, net_amount)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [orderId, cl.product_id, cl.qty, cl.rate, cl.discount_amt, cl.gst_amt, cl.net_amount]
+        `INSERT INTO order_lines (order_id, product_id, qty, carton_qty, pack_qty, rate, discount_amt, gst_amt, net_amount)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [orderId, cl.product_id, cl.qty, cl.carton_qty, cl.pack_qty, cl.rate, cl.discount_amt, cl.gst_amt, cl.net_amount]
       );
     }
     await conn.query(
@@ -181,8 +186,8 @@ router.get('/consolidated/:distributor_id', async (req, res) => {
   if (req.user.role === 'distributor' && Number(req.params.distributor_id) !== req.user.distributor_id) {
     return res.status(403).json({ error: 'Not your distributor account' });
   }
-  const [rows] = await pool.query(
-    `SELECT p.id AS product_id, p.sku_code, p.name AS product_name, p.pack_size,
+  const [rawRows] = await pool.query(
+    `SELECT p.id AS product_id, p.sku_code, p.name AS product_name, p.pack_size, p.units_per_carton,
             SUM(ol.qty) AS total_qty, SUM(ol.net_amount) AS total_value,
             COUNT(DISTINCT o.id) AS order_count
      FROM order_lines ol
@@ -192,6 +197,12 @@ router.get('/consolidated/:distributor_id', async (req, res) => {
      GROUP BY p.id ORDER BY p.name`,
     [req.params.distributor_id, date]
   );
+  // Break the total pack quantity back into full cartons + loose packs for easy box-wise picking.
+  const rows = rawRows.map((r) => {
+    const upc = Number(r.units_per_carton) || 1;
+    const totalQty = Number(r.total_qty);
+    return { ...r, pick_cartons: Math.floor(totalQty / upc), pick_loose_packs: totalQty % upc };
+  });
   const [byRetailer] = await pool.query(
     `SELECT r.id AS retailer_id, r.name AS retailer_name, p.id AS product_id, SUM(ol.qty) AS qty
      FROM order_lines ol

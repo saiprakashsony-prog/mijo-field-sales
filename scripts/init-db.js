@@ -11,11 +11,10 @@ require('dotenv').config();
 const ADMIN_MOBILE = '9999999999';
 const ADMIN_PASSWORD = 'admin123'; // change this immediately after first login
 
-// One-time migration for databases created before the margin-based pricing model:
-// adds retailer_margin_pct/distributor_margin_pct if missing, and drops the old
-// distributor_rate/retailer_rate columns if they're still present. Safe to run
-// on every startup — each step checks first and does nothing if already applied.
-async function migrateProductPricing(conn) {
+// Idempotent migrations for databases created before a schema change — each checks
+// information_schema first and only acts if not already applied, so it's safe to run
+// on every startup alongside schema.sql's CREATE TABLE IF NOT EXISTS statements.
+async function migrate(conn) {
   const [[{ db }]] = await conn.query('SELECT DATABASE() AS db');
   async function columnExists(table, column) {
     const [rows] = await conn.query(
@@ -25,23 +24,29 @@ async function migrateProductPricing(conn) {
     );
     return rows[0].cnt > 0;
   }
+  async function addColumnIfMissing(table, column, ddl) {
+    if (!(await columnExists(table, column))) {
+      console.log(`Migrating ${table}: adding ${column}...`);
+      await conn.query(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+    }
+  }
+  async function dropColumnIfPresent(table, column) {
+    if (await columnExists(table, column)) {
+      console.log(`Migrating ${table}: dropping old ${column} column...`);
+      await conn.query(`ALTER TABLE ${table} DROP COLUMN ${column}`);
+    }
+  }
 
-  if (!(await columnExists('products', 'retailer_margin_pct'))) {
-    console.log('Migrating products: adding retailer_margin_pct...');
-    await conn.query('ALTER TABLE products ADD COLUMN retailer_margin_pct DECIMAL(5,2) NOT NULL DEFAULT 0 AFTER mrp');
-  }
-  if (!(await columnExists('products', 'distributor_margin_pct'))) {
-    console.log('Migrating products: adding distributor_margin_pct...');
-    await conn.query('ALTER TABLE products ADD COLUMN distributor_margin_pct DECIMAL(5,2) NOT NULL DEFAULT 0 AFTER retailer_margin_pct');
-  }
-  if (await columnExists('products', 'distributor_rate')) {
-    console.log('Migrating products: dropping old distributor_rate column...');
-    await conn.query('ALTER TABLE products DROP COLUMN distributor_rate');
-  }
-  if (await columnExists('products', 'retailer_rate')) {
-    console.log('Migrating products: dropping old retailer_rate column...');
-    await conn.query('ALTER TABLE products DROP COLUMN retailer_rate');
-  }
+  // Margin-based, GST-inclusive pricing (replaces the old flat distributor_rate/retailer_rate)
+  await addColumnIfMissing('products', 'retailer_margin_pct', 'retailer_margin_pct DECIMAL(5,2) NOT NULL DEFAULT 0 AFTER mrp');
+  await addColumnIfMissing('products', 'distributor_margin_pct', 'distributor_margin_pct DECIMAL(5,2) NOT NULL DEFAULT 0 AFTER retailer_margin_pct');
+  await dropColumnIfPresent('products', 'distributor_rate');
+  await dropColumnIfPresent('products', 'retailer_rate');
+
+  // Carton packing: order by carton + loose packs
+  await addColumnIfMissing('products', 'units_per_carton', 'units_per_carton INT NOT NULL DEFAULT 1 AFTER gst_pct');
+  await addColumnIfMissing('order_lines', 'carton_qty', 'carton_qty INT NOT NULL DEFAULT 0 AFTER qty');
+  await addColumnIfMissing('order_lines', 'pack_qty', 'pack_qty INT NOT NULL DEFAULT 0 AFTER carton_qty');
 }
 
 async function run() {
@@ -63,7 +68,7 @@ async function run() {
   console.log('Applying schema...');
   await conn.query(schema);
 
-  await migrateProductPricing(conn);
+  await migrate(conn);
 
   const [existing] = await conn.query('SELECT id FROM users WHERE mobile = ?', [ADMIN_MOBILE]);
   if (existing.length === 0) {

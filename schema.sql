@@ -114,6 +114,7 @@ CREATE TABLE IF NOT EXISTS products (
   retailer_margin_pct   DECIMAL(5,2) NOT NULL DEFAULT 0,
   distributor_margin_pct DECIMAL(5,2) NOT NULL DEFAULT 0,
   gst_pct               DECIMAL(5,2) NOT NULL DEFAULT 0,
+  units_per_carton      INT NOT NULL DEFAULT 1,
   scheme_note           VARCHAR(255),
   moq                   INT DEFAULT 1,
   status                ENUM('active','inactive') DEFAULT 'active',
@@ -162,7 +163,9 @@ CREATE TABLE IF NOT EXISTS order_lines (
   id            INT AUTO_INCREMENT PRIMARY KEY,
   order_id      INT NOT NULL,
   product_id    INT NOT NULL,
-  qty           INT NOT NULL,
+  qty           INT NOT NULL,        -- total quantity in individual packs (carton_qty * units_per_carton + pack_qty)
+  carton_qty    INT NOT NULL DEFAULT 0,  -- number of full cartons ordered
+  pack_qty      INT NOT NULL DEFAULT 0,  -- loose individual packs ordered on top of full cartons
   rate          DECIMAL(10,2) NOT NULL,
   discount_amt  DECIMAL(10,2) DEFAULT 0,
   gst_amt       DECIMAL(10,2) DEFAULT 0,

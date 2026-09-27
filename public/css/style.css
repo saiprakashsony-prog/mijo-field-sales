@@ -100,7 +100,7 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: upp
 .login-wrap { display: flex; align-items: center; justify-content: center; min-height: 90vh; }
 .login-box { width: 340px; }
 .error-msg { color: var(--danger); font-size: 13px; margin-top: 8px; }
-.line-item { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 8px; align-items: end; margin-bottom: 8px; }
+.line-item { display: grid; grid-template-columns: 2fr 0.8fr 0.8fr 1fr 1fr auto; gap: 8px; align-items: end; margin-bottom: 8px; }
 .map-search-row { display: flex; gap: 8px; margin-bottom: 8px; }
 .map-search-row input { flex: 1; }
 #retailerMap { height: 320px; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 8px; }

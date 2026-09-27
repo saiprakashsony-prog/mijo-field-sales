@@ -27,15 +27,15 @@ router.get('/', async (req, res) => {
 });
 
 router.post('/', allowRoles('super_admin', 'management'), async (req, res) => {
-  const { sku_code, name, category, brand, pack_size, uom, mrp, retailer_margin_pct, distributor_margin_pct, gst_pct, scheme_note, moq } = req.body;
+  const { sku_code, name, category, brand, pack_size, uom, mrp, retailer_margin_pct, distributor_margin_pct, gst_pct, units_per_carton, scheme_note, moq } = req.body;
   if (!sku_code || !name || mrp == null || retailer_margin_pct == null || distributor_margin_pct == null || gst_pct == null) {
     return res.status(400).json({ error: 'sku_code, name, mrp, retailer_margin_pct, distributor_margin_pct, gst_pct are required' });
   }
   try {
     const [result] = await pool.query(
-      `INSERT INTO products (sku_code, name, category, brand, pack_size, uom, mrp, retailer_margin_pct, distributor_margin_pct, gst_pct, scheme_note, moq)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [sku_code, name, category || null, brand || null, pack_size || null, uom || null, mrp, retailer_margin_pct, distributor_margin_pct, gst_pct, scheme_note || null, moq || 1]
+      `INSERT INTO products (sku_code, name, category, brand, pack_size, uom, mrp, retailer_margin_pct, distributor_margin_pct, gst_pct, units_per_carton, scheme_note, moq)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [sku_code, name, category || null, brand || null, pack_size || null, uom || null, mrp, retailer_margin_pct, distributor_margin_pct, gst_pct, units_per_carton || 1, scheme_note || null, moq || 1]
     );
     res.status(201).json({ id: result.insertId });
   } catch (e) {
@@ -45,7 +45,7 @@ router.post('/', allowRoles('super_admin', 'management'), async (req, res) => {
 });
 
 router.patch('/:id', allowRoles('super_admin', 'management'), async (req, res) => {
-  const fields = ['name', 'category', 'brand', 'pack_size', 'uom', 'mrp', 'retailer_margin_pct', 'distributor_margin_pct', 'gst_pct', 'scheme_note', 'moq', 'status'];
+  const fields = ['name', 'category', 'brand', 'pack_size', 'uom', 'mrp', 'retailer_margin_pct', 'distributor_margin_pct', 'gst_pct', 'units_per_carton', 'scheme_note', 'moq', 'status'];
   const updates = [];
   const values = [];
   for (const f of fields) {

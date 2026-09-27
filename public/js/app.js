@@ -362,28 +362,34 @@ async function renderBooking() {
 
   const linesBox = wrap.querySelector('#lines');
   // rate = Retailer Price (MRP marked down by the product's retailer margin), GST-inclusive —
-  // this is what the retailer actually pays, no GST added on top.
-  const productOptions = products.map((p) => `<option value="${p.id}" data-rate="${p.retailer_price}">${p.name} — ${p.sku_code} (${p.pack_size || ''})</option>`).join('');
+  // this is what the retailer actually pays, no GST added on top. Each line can be ordered as
+  // full cartons, loose packs, or both — total qty = cartons * units_per_carton + packs.
+  const productOptions = products.map((p) => `<option value="${p.id}" data-rate="${p.retailer_price}" data-upc="${p.units_per_carton}">${p.name} — ${p.sku_code} (${p.pack_size || ''}, ${p.units_per_carton} packs/carton)</option>`).join('');
 
   function addLine() {
     const row = el(`
       <div class="line-item">
         <div class="field" style="margin:0"><label>Product</label><select class="lp">${productOptions}</select></div>
-        <div class="field" style="margin:0"><label>Qty</label><input class="lq" type="number" min="1" value="1" /></div>
-        <div class="field" style="margin:0"><label>Rate (incl. GST)</label><input class="lr" disabled /></div>
+        <div class="field" style="margin:0"><label>Cartons</label><input class="lc" type="number" min="0" value="0" /></div>
+        <div class="field" style="margin:0"><label>Loose Packs</label><input class="lq" type="number" min="0" value="1" /></div>
+        <div class="field" style="margin:0"><label>Rate/pack</label><input class="lr" disabled /></div>
         <div class="field" style="margin:0"><label>Net</label><input class="ln" disabled /></div>
         <button class="btn small secondary" style="height:36px">✕</button>
       </div>`);
     function recalc() {
       const opt = row.querySelector('.lp').selectedOptions[0];
       const rate = Number(opt.dataset.rate);
-      const qty = Number(row.querySelector('.lq').value || 0);
-      const net = qty * rate;
+      const upc = Number(opt.dataset.upc) || 1;
+      const cartons = Number(row.querySelector('.lc').value || 0);
+      const packs = Number(row.querySelector('.lq').value || 0);
+      const totalQty = cartons * upc + packs;
+      const net = totalQty * rate;
       row.querySelector('.lr').value = rate.toFixed(2);
       row.querySelector('.ln').value = net.toFixed(2);
       updateTotal();
     }
     row.querySelector('.lp').onchange = recalc;
+    row.querySelector('.lc').oninput = recalc;
     row.querySelector('.lq').oninput = recalc;
     row.querySelector('button').onclick = () => { row.remove(); updateTotal(); };
     linesBox.appendChild(row);
@@ -405,7 +411,8 @@ async function renderBooking() {
     if (!retailerId) { errBox.textContent = 'Select a retailer.'; return; }
     const lines = [...linesBox.querySelectorAll('.line-item')].map((r) => ({
       product_id: r.querySelector('.lp').value,
-      qty: Number(r.querySelector('.lq').value),
+      carton_qty: Number(r.querySelector('.lc').value || 0),
+      pack_qty: Number(r.querySelector('.lq').value || 0),
     }));
     try {
       const result = await api('/orders', { method: 'POST', body: JSON.stringify({ retailer_id: retailerId, lines }) });
@@ -487,8 +494,8 @@ async function renderConsolidated() {
     <div class="card">
       <p class="section-title">Consolidated Picking List — ${date}</p>
       <table>
-        <thead><tr><th>SKU</th><th>Product</th><th>Pack</th><th>Total Qty</th><th>Orders</th><th>Total Value</th></tr></thead>
-        <tbody>${data.sku_summary.map((s) => `<tr><td>${s.sku_code}</td><td>${s.product_name}</td><td>${s.pack_size || ''}</td><td>${s.total_qty}</td><td>${s.order_count}</td><td>${fmtMoney(s.total_value)}</td></tr>`).join('')}</tbody>
+        <thead><tr><th>SKU</th><th>Product</th><th>Pack</th><th>Pick as</th><th>Total Qty (packs)</th><th>Orders</th><th>Total Value</th></tr></thead>
+        <tbody>${data.sku_summary.map((s) => `<tr><td>${s.sku_code}</td><td>${s.product_name}</td><td>${s.pack_size || ''}</td><td>${s.pick_cartons > 0 ? `${s.pick_cartons} carton${s.pick_cartons > 1 ? 's' : ''}` : ''}${s.pick_cartons > 0 && s.pick_loose_packs > 0 ? ' + ' : ''}${s.pick_loose_packs > 0 ? `${s.pick_loose_packs} loose` : (s.pick_cartons > 0 ? '' : `${s.total_qty} loose`)}</td><td>${s.total_qty}</td><td>${s.order_count}</td><td>${fmtMoney(s.total_value)}</td></tr>`).join('')}</tbody>
       </table>
       ${!data.sku_summary.length ? '<p class="muted">No orders to consolidate for today.</p>' : ''}
     </div>`);
@@ -598,6 +605,7 @@ async function renderMasters() {
           <div class="field"><label>Retailer Margin %</label><input id="mpRetailerMargin" type="number" step="0.01" /></div>
           <div class="field"><label>Distributor Margin %</label><input id="mpDistMargin" type="number" step="0.01" /></div>
           <div class="field"><label>GST % (for invoice display only)</label><input id="mpGst" type="number" value="5" /></div>
+          <div class="field"><label>Packs per Carton</label><input id="mpUnitsPerCarton" type="number" min="1" value="1" /></div>
         </div>
         <button class="btn small" id="addProduct">Add Product</button>
         <div id="editProductBox"></div>
@@ -762,6 +770,7 @@ async function renderMasters() {
       retailer_margin_pct: wrap.querySelector('#mpRetailerMargin').value,
       distributor_margin_pct: wrap.querySelector('#mpDistMargin').value,
       gst_pct: wrap.querySelector('#mpGst').value,
+      units_per_carton: wrap.querySelector('#mpUnitsPerCarton').value || 1,
     };
   }
   function clearProductForm() {
@@ -773,14 +782,15 @@ async function renderMasters() {
     wrap.querySelector('#mpRetailerMargin').value = '';
     wrap.querySelector('#mpDistMargin').value = '';
     wrap.querySelector('#mpGst').value = '5';
+    wrap.querySelector('#mpUnitsPerCarton').value = '1';
   }
 
   async function loadProducts() {
     const rows = await api('/products');
     const box = wrap.querySelector('#productList');
-    box.innerHTML = `<table><thead><tr><th>SKU</th><th>Name</th><th>Category</th><th>MRP</th><th>Retailer Price</th><th>Distributor Price</th><th>GST%</th><th></th></tr></thead>
+    box.innerHTML = `<table><thead><tr><th>SKU</th><th>Name</th><th>Category</th><th>MRP</th><th>Retailer Price</th><th>Distributor Price</th><th>GST%</th><th>Packs/Carton</th><th></th></tr></thead>
       <tbody>${rows.map((r) => `<tr data-id="${r.id}">
-        <td>${r.sku_code}</td><td>${r.name}</td><td>${r.category || ''}</td><td>${fmtMoney(r.mrp)}</td><td>${fmtMoney(r.retailer_price)}</td><td>${fmtMoney(r.distributor_price)}</td><td>${r.gst_pct}</td>
+        <td>${r.sku_code}</td><td>${r.name}</td><td>${r.category || ''}</td><td>${fmtMoney(r.mrp)}</td><td>${fmtMoney(r.retailer_price)}</td><td>${fmtMoney(r.distributor_price)}</td><td>${r.gst_pct}</td><td>${r.units_per_carton}</td>
         <td><button class="btn small secondary editProductBtn">Edit</button> <button class="btn small secondary delProductBtn">Delete</button></td>
       </tr>`).join('')}</tbody></table>`;
 
@@ -815,6 +825,7 @@ async function renderMasters() {
           <div class="field"><label>Retailer Margin %</label><input id="epRetailerMargin" type="number" step="0.01" value="${p.retailer_margin_pct}" /></div>
           <div class="field"><label>Distributor Margin %</label><input id="epDistMargin" type="number" step="0.01" value="${p.distributor_margin_pct}" /></div>
           <div class="field"><label>GST %</label><input id="epGst" type="number" value="${p.gst_pct}" /></div>
+          <div class="field"><label>Packs per Carton</label><input id="epUnitsPerCarton" type="number" min="1" value="${p.units_per_carton}" /></div>
           <div class="field"><label>Status</label>
             <select id="epStatus"><option value="active" ${p.status === 'active' ? 'selected' : ''}>Active</option><option value="inactive" ${p.status === 'inactive' ? 'selected' : ''}>Inactive</option></select>
           </div>
@@ -833,6 +844,7 @@ async function renderMasters() {
         retailer_margin_pct: editBox.querySelector('#epRetailerMargin').value,
         distributor_margin_pct: editBox.querySelector('#epDistMargin').value,
         gst_pct: editBox.querySelector('#epGst').value,
+        units_per_carton: editBox.querySelector('#epUnitsPerCarton').value || 1,
         status: editBox.querySelector('#epStatus').value,
       }) });
       editBox.innerHTML = '';
