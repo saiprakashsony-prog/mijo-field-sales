@@ -97,18 +97,41 @@ function logout() {
 }
 
 // ---------- Login ----------
+function completeLogin(data) {
+  state.token = data.token;
+  state.user = data.user;
+  localStorage.setItem('token', data.token);
+  localStorage.setItem('user', JSON.stringify(data.user));
+  render();
+}
+
 function renderLogin() {
   const wrap = el(`
     <div class="login-wrap">
       <div class="card login-box">
-        <p class="section-title">MIJO Foods — Field Sales Login</p>
-        <div class="field"><label>Mobile Number</label><input id="mobile" placeholder="10-digit mobile" /></div>
-        <div class="field"><label>Password</label><input id="password" type="password" /></div>
-        <button class="btn" id="loginBtn" style="width:100%">Log in</button>
-        <div class="error-msg" id="loginErr"></div>
-        <p class="muted" style="margin-top:14px">First time setup? Run <code>npm run initdb</code> on the server, then sign in with the seeded Super Admin login shown in the console.</p>
+        <div id="loginView">
+          <p class="section-title">MIJO Foods — Field Sales Login</p>
+          <div class="field"><label>Mobile Number</label><input id="mobile" placeholder="10-digit mobile" /></div>
+          <div class="field"><label>Password</label><input id="password" type="password" /></div>
+          <button class="btn" id="loginBtn" style="width:100%">Log in</button>
+          <div class="error-msg" id="loginErr"></div>
+          <p class="muted" style="margin-top:14px">First time setup? Run <code>npm run initdb</code> on the server, then sign in with the seeded Super Admin login shown in the console.</p>
+          <p class="muted" style="margin-top:14px">Field employee or distributor with no login yet? <a href="#" id="showRegister">Create your login</a></p>
+        </div>
+        <div id="registerView" style="display:none">
+          <p class="section-title">Create Your Login</p>
+          <p class="muted">Enter the Employee or Distributor Code and mobile number your admin registered for you.</p>
+          <div class="field"><label>Employee or Distributor Code</label><input id="regCode" placeholder="e.g. EMP01598180 or DIST14108449" /></div>
+          <div class="field"><label>Mobile Number (must match what your admin entered)</label><input id="regMobile" /></div>
+          <div class="field"><label>Your Name</label><input id="regName" /></div>
+          <div class="field"><label>Choose a Password (min 6 characters)</label><input id="regPassword" type="password" /></div>
+          <button class="btn" id="registerBtn" style="width:100%">Create Login</button>
+          <div class="error-msg" id="registerErr"></div>
+          <p class="muted" style="margin-top:14px"><a href="#" id="showLogin">Back to log in</a></p>
+        </div>
       </div>
     </div>`);
+
   wrap.querySelector('#loginBtn').onclick = async () => {
     const mobile = wrap.querySelector('#mobile').value.trim();
     const password = wrap.querySelector('#password').value;
@@ -116,15 +139,39 @@ function renderLogin() {
     errBox.textContent = '';
     try {
       const data = await api('/auth/login', { method: 'POST', body: JSON.stringify({ mobile, password }) });
-      state.token = data.token;
-      state.user = data.user;
-      localStorage.setItem('token', data.token);
-      localStorage.setItem('user', JSON.stringify(data.user));
-      render();
+      completeLogin(data);
     } catch (e) {
       errBox.textContent = e.message;
     }
   };
+
+  wrap.querySelector('#showRegister').onclick = (e) => {
+    e.preventDefault();
+    wrap.querySelector('#loginView').style.display = 'none';
+    wrap.querySelector('#registerView').style.display = 'block';
+  };
+  wrap.querySelector('#showLogin').onclick = (e) => {
+    e.preventDefault();
+    wrap.querySelector('#registerView').style.display = 'none';
+    wrap.querySelector('#loginView').style.display = 'block';
+  };
+
+  wrap.querySelector('#registerBtn').onclick = async () => {
+    const errBox = wrap.querySelector('#registerErr');
+    errBox.textContent = '';
+    try {
+      const data = await api('/auth/self-register', { method: 'POST', body: JSON.stringify({
+        code: wrap.querySelector('#regCode').value.trim(),
+        mobile: wrap.querySelector('#regMobile').value.trim(),
+        name: wrap.querySelector('#regName').value.trim(),
+        password: wrap.querySelector('#regPassword').value,
+      }) });
+      completeLogin(data);
+    } catch (e) {
+      errBox.textContent = e.message;
+    }
+  };
+
   return wrap;
 }
 
