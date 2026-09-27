@@ -635,11 +635,15 @@ async function renderDashboard() {
       </div>
     </div>`);
 
-  // "Today" charts render once, from the initial summary fetch above
-  drawBarChart(wrap.querySelector('#chartByDistributor'), d.byDistributor.map((r) => r.name), d.byDistributor.map((r) => Number(r.order_value)), { label: 'Order value', tooltipFormatter: fmtMoney, colorful: true });
-  drawBarChart(wrap.querySelector('#chartByEmployee'), d.byEmployee.map((r) => r.name), d.byEmployee.map((r) => Number(r.order_value)), { label: 'Order value', tooltipFormatter: fmtMoney, colorful: true });
-  drawBarChart(wrap.querySelector('#chartTopSkus'), d.topSkus.map((r) => r.name), d.topSkus.map((r) => Number(r.qty)), { label: 'Qty', color: '#1d4ed8' });
-  drawDoughnutChart(wrap.querySelector('#chartByStatus'), d.byStatus.map((r) => r.status.replace(/_/g, ' ')), d.byStatus.map((r) => Number(r.cnt)));
+  // Chart.js needs its canvas actually attached to the document (it reads computed styles
+  // from it), but this function's caller appends `wrap` to the page only after this async
+  // function returns. setTimeout(..., 0) defers these draws until just after that append.
+  function drawTodayCharts() {
+    drawBarChart(wrap.querySelector('#chartByDistributor'), d.byDistributor.map((r) => r.name), d.byDistributor.map((r) => Number(r.order_value)), { label: 'Order value', tooltipFormatter: fmtMoney, colorful: true });
+    drawBarChart(wrap.querySelector('#chartByEmployee'), d.byEmployee.map((r) => r.name), d.byEmployee.map((r) => Number(r.order_value)), { label: 'Order value', tooltipFormatter: fmtMoney, colorful: true });
+    drawBarChart(wrap.querySelector('#chartTopSkus'), d.topSkus.map((r) => r.name), d.topSkus.map((r) => Number(r.qty)), { label: 'Qty', color: '#1d4ed8' });
+    drawDoughnutChart(wrap.querySelector('#chartByStatus'), d.byStatus.map((r) => r.status.replace(/_/g, ' ')), d.byStatus.map((r) => Number(r.cnt)));
+  }
 
   async function loadPerformance(days) {
     const p = await api(`/dashboard/performance?days=${days}`);
@@ -684,7 +688,7 @@ async function renderDashboard() {
   }
 
   wrap.querySelector('#perfDays').onchange = (e) => loadPerformance(e.target.value);
-  await loadPerformance(30);
+  setTimeout(() => { drawTodayCharts(); loadPerformance(30); }, 0);
 
   return wrap;
 }
