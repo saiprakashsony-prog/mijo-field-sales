@@ -2,6 +2,7 @@ const express = require('express');
 const pool = require('../db');
 const { authRequired, allowRoles } = require('../middleware/auth');
 const { findBestScheme } = require('./schemes');
+const { computeCreditStatus } = require('./retailers');
 
 const router = express.Router();
 router.use(authRequired);
@@ -117,6 +118,23 @@ router.post('/', async (req, res) => {
       computedLines.push({ product_id: p.id, qty, carton_qty: cartonQty, pack_qty: packQty, rate, discount_amt: discount, scheme_id: schemeId, gst_amt: gst, net_amount: net });
     }
 
+    // Credit limit: hard block if this order would push the retailer over their limit,
+    // counting what they'd owe once this order is billed on top of their current
+    // outstanding balance. Only enforced when the retailer actually has a credit_limit set
+    // (0 = no credit control) — overdue status is reported but never blocks booking here,
+    // since it's a simplified retailer-level heuristic rather than per-invoice ageing.
+    const credit = await computeCreditStatus(conn, retailer_id);
+    let creditWarning = null;
+    if (credit && credit.credit_limit > 0) {
+      const projected = Math.round((credit.outstanding_balance + total) * 100) / 100;
+      if (projected > credit.credit_limit) {
+        throw new Error(`This order would take the retailer's outstanding balance to ₹${projected.toFixed(2)}, over their credit limit of ₹${credit.credit_limit.toFixed(2)} (current outstanding: ₹${credit.outstanding_balance.toFixed(2)}). Record a payment or raise their limit before booking.`);
+      }
+    }
+    if (credit && credit.is_overdue) {
+      creditWarning = `Note: this retailer has an overdue balance of ${credit.outstanding_balance.toFixed(2)} from an order placed on ${credit.oldest_overdue_date}.`;
+    }
+
     const orderNo = genOrderNo();
     const [orderResult] = await conn.query(
       `INSERT INTO orders (order_no, order_date, employee_id, distributor_id, retailer_id, visit_id, status, total_amount)
@@ -138,7 +156,7 @@ router.post('/', async (req, res) => {
     );
 
     await conn.commit();
-    res.status(201).json({ id: orderId, order_no: orderNo, total_amount: total, distributor_id: distributorId });
+    res.status(201).json({ id: orderId, order_no: orderNo, total_amount: total, distributor_id: distributorId, credit_warning: creditWarning });
   } catch (e) {
     await conn.rollback();
     res.status(400).json({ error: e.message });

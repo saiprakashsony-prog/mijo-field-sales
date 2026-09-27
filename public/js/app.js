@@ -546,7 +546,8 @@ async function renderBooking() {
     }));
     try {
       const result = await api('/orders', { method: 'POST', body: JSON.stringify({ retailer_id: retailerId, lines }) });
-      okBox.innerHTML = `<p style="color:var(--ok)">Order ${result.order_no} submitted for ${fmtMoney(result.total_amount)}. It has been routed to the mapped distributor and is now visible on the management dashboard.</p>`;
+      okBox.innerHTML = `<p style="color:var(--ok)">Order ${result.order_no} submitted for ${fmtMoney(result.total_amount)}. It has been routed to the mapped distributor and is now visible on the management dashboard.</p>`
+        + (result.credit_warning ? `<p style="color:var(--warn)">⚠ ${result.credit_warning}</p>` : '');
     } catch (e) { errBox.textContent = e.message; }
   };
 
@@ -785,6 +786,7 @@ const MASTERS_SECTIONS = [
   ['employees', 'Field Employees'],
   ['products', 'Products'],
   ['schemes', 'Schemes'],
+  ['credit', 'Credit'],
   ['logins', 'Logins'],
 ];
 
@@ -921,6 +923,32 @@ async function renderMasters() {
         <button class="btn small" id="addScheme">Add Scheme</button>
         <div class="error-msg" id="msErr"></div>
         <div id="schemeList" style="margin-top:10px"></div>
+      </div>
+      </div>
+      <div class="master-section" data-section="credit">
+      <div class="card">
+        <p class="section-title">Retailer Credit</p>
+        <p class="muted">Outstanding = billed orders (dispatched/delivered) minus recorded payments. A retailer is flagged overdue if they still owe money from an order older than their payment terms. Credit Limit of ₹0 means no limit is enforced for that retailer.</p>
+        <div id="creditList"></div>
+      </div>
+      <div class="card">
+        <p class="section-title">Record a Payment</p>
+        <div class="grid cols-4">
+          <div class="field"><label>Retailer</label><select id="pmtRetailer"></select></div>
+          <div class="field"><label>Amount</label><input id="pmtAmount" type="number" step="0.01" /></div>
+          <div class="field"><label>Payment Date</label><input id="pmtDate" type="date" /></div>
+          <div class="field"><label>Method</label>
+            <select id="pmtMethod"><option value="cash">Cash</option><option value="upi">UPI</option><option value="cheque">Cheque</option><option value="bank_transfer">Bank Transfer</option><option value="other">Other</option></select>
+          </div>
+          <div class="field"><label>Reference (optional)</label><input id="pmtReference" /></div>
+          <div class="field"><label>Notes (optional)</label><input id="pmtNotes" /></div>
+        </div>
+        <button class="btn small" id="addPayment">Record Payment</button>
+        <div class="error-msg" id="pmtErr"></div>
+      </div>
+      <div class="card">
+        <p class="section-title">Payment History</p>
+        <div id="paymentList"></div>
       </div>
       </div>
       <div class="master-section" data-section="logins">
@@ -1121,6 +1149,78 @@ async function renderMasters() {
       wrap.querySelector('#mmName').value = '';
       loadMandals();
     } catch (e) { alert(e.message); }
+  };
+
+  let retailersCache = [];
+  async function loadCreditList() {
+    retailersCache = await api('/retailers');
+    const box = wrap.querySelector('#creditList');
+    box.innerHTML = '<p class="muted">Loading credit status...</p>';
+    const statuses = await Promise.all(retailersCache.map((r) => api(`/retailers/${r.id}/credit-status`).catch(() => null)));
+    box.innerHTML = `<table><thead><tr><th>Retailer</th><th>Distributor</th><th>Credit Limit</th><th>Terms (days)</th><th>Outstanding</th><th>Status</th><th></th></tr></thead>
+      <tbody>${retailersCache.map((r, i) => {
+        const s = statuses[i];
+        const overdue = s && s.is_overdue;
+        return `<tr data-id="${r.id}">
+          <td>${r.name} (${r.code})</td><td>${r.distributor_name || ''}</td>
+          <td><input class="crLimit" type="number" step="0.01" value="${s ? s.credit_limit : 0}" style="width:100px" /></td>
+          <td><input class="crTerms" type="number" min="0" value="${s ? s.payment_terms_days : 0}" style="width:70px" /></td>
+          <td>${s ? fmtMoney(s.outstanding_balance) : '—'}</td>
+          <td>${overdue ? `<span class="badge cancelled">Overdue since ${s.oldest_overdue_date}</span>` : '<span class="badge delivered">OK</span>'}</td>
+          <td><button class="btn small secondary saveCreditBtn">Save</button></td>
+        </tr>`;
+      }).join('')}</tbody></table>`;
+    box.querySelectorAll('.saveCreditBtn').forEach((btn) => {
+      btn.onclick = async () => {
+        const tr = btn.closest('tr');
+        try {
+          await api(`/retailers/${tr.dataset.id}`, { method: 'PATCH', body: JSON.stringify({
+            credit_limit: tr.querySelector('.crLimit').value || 0,
+            payment_terms_days: tr.querySelector('.crTerms').value || 0,
+          }) });
+          loadCreditList();
+        } catch (e) { alert(e.message); }
+      };
+    });
+    wrap.querySelector('#pmtRetailer').innerHTML = retailersCache.map((r) => `<option value="${r.id}">${r.name} (${r.code})</option>`).join('');
+  }
+
+  async function loadPaymentHistory() {
+    const rows = await api('/payments');
+    const box = wrap.querySelector('#paymentList');
+    box.innerHTML = rows.length
+      ? `<table><thead><tr><th>Date</th><th>Retailer</th><th>Amount</th><th>Method</th><th>Reference</th><th></th></tr></thead>
+         <tbody>${rows.map((r) => `<tr data-id="${r.id}"><td>${r.payment_date}</td><td>${r.retailer_name} (${r.retailer_code})</td><td>${fmtMoney(r.amount)}</td><td>${r.method || ''}</td><td>${r.reference || ''}</td><td><button class="btn small secondary delPaymentBtn">Delete</button></td></tr>`).join('')}</tbody></table>`
+      : '<p class="muted">No payments recorded yet.</p>';
+    box.querySelectorAll('.delPaymentBtn').forEach((btn) => {
+      btn.onclick = async () => {
+        if (!confirm('Delete this payment record? This will increase the retailer\'s outstanding balance.')) return;
+        await api(`/payments/${btn.closest('tr').dataset.id}`, { method: 'DELETE' });
+        loadPaymentHistory();
+        loadCreditList();
+      };
+    });
+  }
+
+  wrap.querySelector('#pmtDate').value = todayISO();
+  wrap.querySelector('#addPayment').onclick = async () => {
+    const errBox = wrap.querySelector('#pmtErr');
+    errBox.textContent = '';
+    try {
+      await api('/payments', { method: 'POST', body: JSON.stringify({
+        retailer_id: wrap.querySelector('#pmtRetailer').value,
+        amount: wrap.querySelector('#pmtAmount').value,
+        payment_date: wrap.querySelector('#pmtDate').value,
+        method: wrap.querySelector('#pmtMethod').value,
+        reference: wrap.querySelector('#pmtReference').value,
+        notes: wrap.querySelector('#pmtNotes').value,
+      }) });
+      wrap.querySelector('#pmtAmount').value = '';
+      wrap.querySelector('#pmtReference').value = '';
+      wrap.querySelector('#pmtNotes').value = '';
+      loadCreditList();
+      loadPaymentHistory();
+    } catch (e) { errBox.textContent = e.message; }
   };
 
   async function loadSchemeFormOptions() {
@@ -1459,6 +1559,8 @@ async function renderMasters() {
   await loadDistributorOptions();
   await loadSchemeFormOptions();
   await loadSchemes();
+  await loadCreditList();
+  await loadPaymentHistory();
   await loadLogins();
   return wrap;
 }
