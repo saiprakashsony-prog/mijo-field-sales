@@ -117,4 +117,66 @@ router.post('/', async (req, res) => {
   res.status(201).json({ id: result.insertId, code });
 });
 
-module.exports = router;
+// Simplified retailer-level credit calculation — not per-invoice ageing:
+//   outstanding = SUM(total_amount of billed orders) - SUM(payments), floored at 0
+//   is_overdue  = true if any billed order's (order_date + payment_terms_days) is in the
+//                 past AND there's still an outstanding balance. This flags the retailer
+//                 as a whole, not which specific invoice is overdue.
+// "Billed" = dispatched or delivered orders (not cancelled, and not still mid-flow).
+async function computeCreditStatus(conn, retailerId) {
+  const [[retailer]] = await conn.query('SELECT credit_limit, payment_terms_days FROM retailers WHERE id = ?', [retailerId]);
+  if (!retailer) return null;
+
+  const [[{ total_billed }]] = await conn.query(
+    `SELECT COALESCE(SUM(total_amount), 0) AS total_billed FROM orders
+     WHERE retailer_id = ? AND status IN ('dispatched', 'delivered')`,
+    [retailerId]
+  );
+  const [[{ total_paid }]] = await conn.query(
+    `SELECT COALESCE(SUM(amount), 0) AS total_paid FROM payments WHERE retailer_id = ?`,
+    [retailerId]
+  );
+  const outstanding = Math.max(0, Math.round((Number(total_billed) - Number(total_paid)) * 100) / 100);
+
+  const [[{ oldest_overdue_date }]] = await conn.query(
+    `SELECT MIN(order_date) AS oldest_overdue_date FROM orders
+     WHERE retailer_id = ? AND status IN ('dispatched', 'delivered')
+       AND DATE_ADD(order_date, INTERVAL ? DAY) < CURDATE()`,
+    [retailerId, retailer.payment_terms_days]
+  );
+  const isOverdue = outstanding > 0 && !!oldest_overdue_date;
+
+  return {
+    credit_limit: Number(retailer.credit_limit),
+    payment_terms_days: retailer.payment_terms_days,
+    total_billed: Number(total_billed),
+    total_paid: Number(total_paid),
+    outstanding_balance: outstanding,
+    available_credit: retailer.credit_limit > 0 ? Math.round((Number(retailer.credit_limit) - outstanding) * 100) / 100 : null,
+    is_overdue: isOverdue,
+    oldest_overdue_date: oldest_overdue_date || null,
+  };
+}
+
+router.get('/:id/credit-status', async (req, res) => {
+  const status = await computeCreditStatus(pool, req.params.id);
+  if (!status) return res.status(404).json({ error: 'Not found' });
+  res.json(status);
+});
+
+// Edit retailer basics + credit settings (admin only for credit fields; the retailer record
+// itself may already exist from a field employee's New Retailer flow).
+router.patch('/:id', allowRoles('super_admin', 'management'), async (req, res) => {
+  const fields = ['name', 'owner_name', 'mobile', 'address', 'pincode', 'gstin', 'shop_type', 'status', 'credit_limit', 'payment_terms_days'];
+  const updates = [];
+  const values = [];
+  for (const f of fields) {
+    if (req.body[f] !== undefined) { updates.push(`${f} = ?`); values.push(req.body[f]); }
+  }
+  if (!updates.length) return res.status(400).json({ error: 'No fields to update' });
+  values.push(req.params.id);
+  await pool.query(`UPDATE retailers SET ${updates.join(', ')} WHERE id = ?`, values);
+  res.json({ ok: true });
+});
+
+module.exports = { router, computeCreditStatus };

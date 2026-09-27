@@ -50,6 +50,10 @@ async function migrate(conn) {
 
   // Scheme engine: track which scheme (if any) produced a line's discount
   await addColumnIfMissing('order_lines', 'scheme_id', 'scheme_id INT NULL AFTER discount_amt');
+
+  // Credit limits & overdue controls
+  await addColumnIfMissing('retailers', 'credit_limit', 'credit_limit DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER status');
+  await addColumnIfMissing('retailers', 'payment_terms_days', 'payment_terms_days INT NOT NULL DEFAULT 0 AFTER credit_limit');
 }
 
 async function run() {

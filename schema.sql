@@ -142,6 +142,8 @@ CREATE TABLE IF NOT EXISTS retailers (
   distributor_id    INT NOT NULL,
   created_by        INT NOT NULL,        -- employees.id
   status            ENUM('active','inactive') DEFAULT 'active',
+  credit_limit      DECIMAL(12,2) NOT NULL DEFAULT 0,  -- 0 = no credit control for this retailer
+  payment_terms_days INT NOT NULL DEFAULT 0,           -- days after order_date an invoice is due (0 = due same day)
   created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (territory_id) REFERENCES territories(id),
   FOREIGN KEY (distributor_id) REFERENCES distributors(id),
@@ -149,6 +151,23 @@ CREATE TABLE IF NOT EXISTS retailers (
   INDEX idx_mobile (mobile),
   INDEX idx_gstin (gstin),
   INDEX idx_gps (gps_lat, gps_lng)
+);
+
+-- Payments/collections recorded against a retailer's outstanding balance. Kept simple
+-- (retailer-level running balance) rather than allocating a payment to specific orders —
+-- outstanding = SUM(billed order totals) - SUM(payments); overdue is a heuristic (see
+-- computeCreditStatus in routes/retailers.js), not per-invoice ageing.
+CREATE TABLE IF NOT EXISTS payments (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  retailer_id   INT NOT NULL,
+  amount        DECIMAL(12,2) NOT NULL,
+  payment_date  DATE NOT NULL,
+  method        VARCHAR(30),   -- cash / upi / cheque / bank_transfer / other
+  reference     VARCHAR(100),
+  notes         VARCHAR(255),
+  recorded_by   INT,           -- users.id
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (retailer_id) REFERENCES retailers(id)
 );
 
 -- Pricing model: MRP is GST-inclusive (all prices in this app are GST-inclusive —
