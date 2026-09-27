@@ -16,6 +16,10 @@ body {
   font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
   background: var(--bg);
   color: var(--ink);
+  /* Keeps content clear of the notch/status bar and home indicator when installed as a
+     standalone PWA on iOS — harmless (0px) everywhere else, including desktop and Android. */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 header.topbar {
   background: var(--brand);
