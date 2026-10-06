@@ -1,7 +1,8 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const pool = require('../db');
-const { authRequired, allowRoles } = require('../middleware/auth');
+const { authRequired, allowRoles, clearAuthCache } = require('../middleware/auth');
+const { safeMsg } = require('../middleware/safeError');
 
 const router = express.Router();
 router.use(authRequired);
@@ -28,6 +29,7 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ error: 'distributor_id is required for a distributor or delivery_executive login' });
   }
 
+  if (String(password).length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
   const hash = await bcrypt.hash(password, 10);
   try {
     const [result] = await pool.query(
@@ -37,12 +39,13 @@ router.post('/', async (req, res) => {
     res.status(201).json({ id: result.insertId });
   } catch (e) {
     if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'A login with this mobile number already exists' });
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: safeMsg(e) });
   }
 });
 
 router.patch('/:id/status', async (req, res) => {
   await pool.query('UPDATE users SET status = ? WHERE id = ?', [req.body.status, req.params.id]);
+  clearAuthCache(); // deactivation must take effect immediately, not after the short cache expires
   res.json({ ok: true });
 });
 

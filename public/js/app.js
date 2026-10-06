@@ -12,6 +12,11 @@ async function api(path, opts = {}) {
   const res = await fetch(API + path, { ...opts, headers: { ...headers, ...(opts.headers || {}) } });
   let data;
   try { data = await res.json(); } catch { data = null; }
+  if (res.status === 401 && state.token) {
+    // The server says this session is no longer valid (account deactivated, or the token expired).
+    logout((data && data.error) || 'Your session has ended. Please log in again.');
+    throw new Error('Session ended');
+  }
   if (!res.ok) throw new Error((data && data.error) || `Request failed (${res.status})`);
   return data;
 }
@@ -24,6 +29,14 @@ function el(html) {
 function fmtMoney(n) { return '₹' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 }); }
 function fmtDate(d) { return d ? new Date(d).toLocaleString('en-IN') : ''; }
 function todayISO() { return new Date().toISOString().slice(0, 10); }
+
+// Escapes text before it goes into an HTML template. Every value the API returns that a person
+// typed (names, addresses, reasons, notes...) must pass through this, or it can run as code in
+// someone else's browser — e.g. a retailer name entered by a field employee, shown to an admin.
+function esc(v) {
+  return String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 
 // ---------- Chart helper (Chart.js) ----------
 const CHART_PALETTE = ['#d84315', '#f57c34', '#1b8a5a', '#1d4ed8', '#7c3aed', '#b45309', '#4338ca', '#0891b2', '#be123c', '#65a30d'];
@@ -88,11 +101,12 @@ function render() {
   app.appendChild(renderShell());
 }
 
-function logout() {
+function logout(reason) {
   localStorage.removeItem('token');
   localStorage.removeItem('user');
   state.token = null;
   state.user = null;
+  state.flash = typeof reason === 'string' ? reason : '';
   render();
 }
 
@@ -124,13 +138,15 @@ function renderLogin() {
           <div class="field"><label>Employee or Distributor Code</label><input id="regCode" placeholder="e.g. EMP01598180 or DIST14108449" /></div>
           <div class="field"><label>Mobile Number (must match what your admin entered)</label><input id="regMobile" /></div>
           <div class="field"><label>Your Name</label><input id="regName" /></div>
-          <div class="field"><label>Choose a Password (min 6 characters)</label><input id="regPassword" type="password" /></div>
+          <div class="field"><label>Choose a Password (min 8 characters)</label><input id="regPassword" type="password" /></div>
           <button class="btn" id="registerBtn" style="width:100%">Create Login</button>
           <div class="error-msg" id="registerErr"></div>
           <p class="muted" style="margin-top:14px"><a href="#" id="showLogin">Back to log in</a></p>
         </div>
       </div>
     </div>`);
+
+  if (state.flash) { wrap.querySelector('#loginErr').textContent = state.flash; state.flash = ''; }
 
   wrap.querySelector('#loginBtn').onclick = async () => {
     const mobile = wrap.querySelector('#mobile').value.trim();
@@ -192,7 +208,7 @@ function renderShell() {
     <div>
       <header class="topbar">
         <h1>MIJO Foods · Field Sales</h1>
-        <div class="who">${state.user.name} (${state.user.role.replace('_', ' ')}) &nbsp;
+        <div class="who">${esc(state.user.name)} (${state.user.role.replace('_', ' ')}) &nbsp;
           <button class="btn small secondary" id="logoutBtn">Log out</button>
         </div>
       </header>
@@ -218,7 +234,7 @@ function renderShell() {
     deliveries: renderDeliveries,
   };
   (renderers[state.tab] || (() => el('<div/>')))().then((node) => main.appendChild(node)).catch((e) => {
-    main.appendChild(el(`<div class="card error-msg">${e.message}</div>`));
+    main.appendChild(el(`<div class="card error-msg">${esc(e.message)}</div>`));
   });
   return shell;
 }
@@ -251,11 +267,11 @@ async function renderMyRoute() {
       ${data.beats.map((beat) => {
         const doneCount = beat.retailers.filter((r) => r.visited_today).length;
         return `<div class="card">
-          <p class="section-title">${beat.name} — ${dayLabel} <span class="muted" style="font-weight:400">(${doneCount}/${beat.retailers.length} visited today)</span></p>
+          <p class="section-title">${esc(beat.name)} — ${dayLabel} <span class="muted" style="font-weight:400">(${doneCount}/${esc(beat.retailers.length)} visited today)</span></p>
           ${beat.retailers.length
             ? `<table><thead><tr><th>#</th><th>Retailer</th><th>Address</th><th>Status</th></tr></thead>
                <tbody>${beat.retailers.map((r, i) => `<tr>
-                 <td>${i + 1}</td><td>${r.name} (${r.code})</td><td>${r.address || ''}</td>
+                 <td>${i + 1}</td><td>${esc(r.name)} (${esc(r.code)})</td><td>${esc(r.address || '')}</td>
                  <td><span class="badge ${r.visited_today ? 'delivered' : 'submitted'}">${r.visited_today ? 'Visited' : 'Pending'}</span></td>
                </tr>`).join('')}</tbody></table>`
             : '<p class="muted">No retailers added to this beat yet.</p>'}
@@ -281,10 +297,10 @@ async function renderNewRetailer() {
         <div class="field"><label>GSTIN (optional)</label><input id="rgstin" /></div>
         <div class="field"><label>PIN Code</label><input id="rpincode" /></div>
         <div class="field"><label>Territory</label>
-          <select id="rterritory"><option value="">--</option>${territories.map((t) => `<option value="${t.id}">${t.name}</option>`).join('')}</select>
+          <select id="rterritory"><option value="">--</option>${territories.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}</select>
         </div>
         <div class="field"><label>Distributor (order routing) *</label>
-          <select id="rdistributor">${distributors.map((d) => `<option value="${d.id}">${d.name}</option>`).join('')}</select>
+          <select id="rdistributor">${distributors.map((d) => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join('')}</select>
         </div>
       </div>
       <div class="field"><label>Address *</label><textarea id="raddress" rows="2"></textarea></div>
@@ -368,7 +384,7 @@ async function renderNewRetailer() {
       });
       const box = wrap.querySelector('#dupWarning');
       if (dup.possible_duplicates.length) {
-        box.innerHTML = `<div class="card" style="border-color:#f59e0b;background:#fffbeb"><b>Possible duplicate retailer(s) found:</b><ul>${dup.possible_duplicates.map((d) => `<li>${d.name} (${d.code}) — matched on ${d.matched_on}${d.distance_m != null ? `, ${d.distance_m}m away` : ''}</li>`).join('')}</ul></div>`;
+        box.innerHTML = `<div class="card" style="border-color:#f59e0b;background:#fffbeb"><b>Possible duplicate retailer(s) found:</b><ul>${dup.possible_duplicates.map((d) => `<li>${esc(d.name)} (${esc(d.code)}) — matched on ${esc(d.matched_on)}${d.distance_m != null ? `, ${esc(d.distance_m)}m away` : ''}</li>`).join('')}</ul></div>`;
       } else { box.innerHTML = ''; }
     } catch {}
   }
@@ -427,7 +443,7 @@ async function renderNewRetailer() {
       if (!results.length) { resultsBox.innerHTML = '<div class="muted">No results — try clicking the map directly instead.</div>'; return; }
       resultsBox.innerHTML = '';
       results.forEach((r) => {
-        const item = el(`<div>${r.display_name}</div>`);
+        const item = el(`<div>${esc(r.display_name)}</div>`);
         item.onclick = () => {
           const lat = Number(r.lat), lng = Number(r.lon);
           map.setView([lat, lng], 17);
@@ -465,7 +481,7 @@ async function renderNewRetailer() {
         distributor_id: wrap.querySelector('#rdistributor').value,
       };
       const result = await api('/retailers', { method: 'POST', body: JSON.stringify(payload) });
-      okBox.innerHTML = `<p style="color:var(--ok)">Retailer saved: ${result.code}. You can now book an order for this retailer from the "Book Order" tab.</p>`;
+      okBox.innerHTML = `<p style="color:var(--ok)">Retailer saved: ${esc(result.code)}. You can now book an order for this retailer from the "Book Order" tab.</p>`;
     } catch (e) { errBox.textContent = e.message; }
   };
 
@@ -482,7 +498,7 @@ async function renderBooking() {
     <div class="card">
       <p class="section-title">Book Order</p>
       <div class="field"><label>Retailer *</label>
-        <select id="bRetailer"><option value="">-- select --</option>${retailers.map((r) => `<option value="${r.id}">${r.name} (${r.code}) — ${r.distributor_name}</option>`).join('')}</select>
+        <select id="bRetailer"><option value="">-- select --</option>${retailers.map((r) => `<option value="${esc(r.id)}">${esc(r.name)} (${esc(r.code)}) — ${esc(r.distributor_name)}</option>`).join('')}</select>
       </div>
       <div id="lines"></div>
       <button class="btn secondary small" id="addLine">+ Add Product Line</button>
@@ -496,7 +512,7 @@ async function renderBooking() {
   // rate = Retailer Price (MRP marked down by the product's retailer margin), GST-inclusive —
   // this is what the retailer actually pays, no GST added on top. Each line can be ordered as
   // full cartons, loose packs, or both — total qty = cartons * units_per_carton + packs.
-  const productOptions = products.map((p) => `<option value="${p.id}" data-rate="${p.retailer_price}" data-upc="${p.units_per_carton}">${p.name} — ${p.sku_code} (${p.pack_size || ''}, ${p.units_per_carton} packs/carton)</option>`).join('');
+  const productOptions = products.map((p) => `<option value="${esc(p.id)}" data-rate="${esc(p.retailer_price)}" data-upc="${esc(p.units_per_carton)}">${esc(p.name)} — ${esc(p.sku_code)} (${esc(p.pack_size || '')}, ${esc(p.units_per_carton)} packs/carton)</option>`).join('');
 
   function currentRetailer() {
     const id = wrap.querySelector('#bRetailer').value;
@@ -540,7 +556,7 @@ async function renderBooking() {
           const net = Math.max(0, gross - match.discount_amt);
           row.dataset.discount = String(match.discount_amt);
           row.querySelector('.ln').value = net.toFixed(2);
-          schemeNote.textContent = `Scheme applied: ${match.scheme.name} (-${fmtMoney(match.discount_amt)})`;
+          schemeNote.textContent = `Scheme applied: ${match.scheme.name} (-${fmtMoney(match.discount_amt)})`; // textContent is already safe
           schemeNote.style.color = 'var(--ok)';
         } else {
           schemeNote.textContent = '';
@@ -579,8 +595,8 @@ async function renderBooking() {
     }));
     try {
       const result = await api('/orders', { method: 'POST', body: JSON.stringify({ retailer_id: retailerId, lines }) });
-      okBox.innerHTML = `<p style="color:var(--ok)">Order ${result.order_no} submitted for ${fmtMoney(result.total_amount)}. It has been routed to the mapped distributor and is now visible on the management dashboard.</p>`
-        + (result.credit_warning ? `<p style="color:var(--warn)">⚠ ${result.credit_warning}</p>` : '');
+      okBox.innerHTML = `<p style="color:var(--ok)">Order ${esc(result.order_no)} submitted for ${fmtMoney(result.total_amount)}. It has been routed to the mapped distributor and is now visible on the management dashboard.</p>`
+        + (result.credit_warning ? `<p style="color:var(--warn)">⚠ ${esc(result.credit_warning)}</p>` : '');
     } catch (e) { errBox.textContent = e.message; }
   };
 
@@ -614,13 +630,13 @@ async function renderReturns() {
         <p class="section-title">Report a Return</p>
         <div class="grid cols-3">
           <div class="field"><label>Retailer *</label>
-            <select id="rtRetailer"><option value="">-- select --</option>${retailers.map((r) => `<option value="${r.id}">${r.name} (${r.code})</option>`).join('')}</select>
+            <select id="rtRetailer"><option value="">-- select --</option>${retailers.map((r) => `<option value="${esc(r.id)}">${esc(r.name)} (${esc(r.code)})</option>`).join('')}</select>
           </div>
           <div class="field"><label>Related Order (optional)</label>
             <select id="rtOrder"><option value="">-- none --</option></select>
           </div>
           <div class="field"><label>Product *</label>
-            <select id="rtProduct"><option value="">-- select --</option>${products.map((p) => `<option value="${p.id}">${p.name} (${p.sku_code})</option>`).join('')}</select>
+            <select id="rtProduct"><option value="">-- select --</option>${products.map((p) => `<option value="${esc(p.id)}">${esc(p.name)} (${esc(p.sku_code)})</option>`).join('')}</select>
           </div>
           <div class="field"><label>Qty (packs) *</label><input id="rtQty" type="number" min="1" /></div>
           <div class="field"><label>Return Type *</label>
@@ -649,7 +665,7 @@ async function renderReturns() {
       const retId = e.target.value;
       const orderSel = wrap.querySelector('#rtOrder');
       const matching = orders.filter((o) => String(o.retailer_id) === retId);
-      orderSel.innerHTML = '<option value="">-- none --</option>' + matching.map((o) => `<option value="${o.id}">${o.order_no} (${o.order_date})</option>`).join('');
+      orderSel.innerHTML = '<option value="">-- none --</option>' + matching.map((o) => `<option value="${esc(o.id)}">${esc(o.order_no)} (${esc(o.order_date)})</option>`).join('');
     };
     wrap.querySelector('#submitReturn').onclick = async () => {
       const errBox = wrap.querySelector('#rtErr');
@@ -664,7 +680,7 @@ async function renderReturns() {
           return_type: wrap.querySelector('#rtType').value,
           reason: wrap.querySelector('#rtReason').value,
         }) });
-        okBox.innerHTML = `<p style="color:var(--ok)">Return ${result.return_no} reported for ${fmtMoney(result.amount)}, pending approval.</p>`;
+        okBox.innerHTML = `<p style="color:var(--ok)">Return ${esc(result.return_no)} reported for ${fmtMoney(result.amount)}, pending approval.</p>`;
         wrap.querySelector('#rtQty').value = '';
         wrap.querySelector('#rtReason').value = '';
         loadReturnsList();
@@ -677,11 +693,11 @@ async function renderReturns() {
     const box = wrap.querySelector('#returnsList');
     box.innerHTML = rows.length
       ? `<table><thead><tr><th>Return No</th><th>Date</th><th>Retailer</th><th>Product</th><th>Qty</th><th>Amount</th><th>Type</th><th>Status</th>${canReview ? '<th></th>' : ''}</tr></thead>
-         <tbody>${rows.map((r) => `<tr data-id="${r.id}">
-           <td>${r.return_no}</td><td>${r.created_at.slice(0, 10)}</td><td>${r.retailer_name} (${r.retailer_code})</td>
-           <td>${r.product_name} (${r.sku_code})</td><td>${r.qty}</td><td>${fmtMoney(r.amount)}</td>
+         <tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}">
+           <td>${esc(r.return_no)}</td><td>${r.created_at.slice(0, 10)}</td><td>${esc(r.retailer_name)} (${esc(r.retailer_code)})</td>
+           <td>${esc(r.product_name)} (${esc(r.sku_code)})</td><td>${esc(r.qty)}</td><td>${fmtMoney(r.amount)}</td>
            <td>${r.return_type.replace('_', ' ')}</td>
-           <td><span class="badge ${r.status === 'approved' ? 'delivered' : r.status === 'rejected' ? 'cancelled' : 'submitted'}">${r.status}</span></td>
+           <td><span class="badge ${r.status === 'approved' ? 'delivered' : r.status === 'rejected' ? 'cancelled' : 'submitted'}">${esc(r.status)}</span></td>
            ${canReview ? `<td>${r.status === 'requested' ? `<button class="btn small secondary approveReturnBtn">Approve</button> <button class="btn small secondary rejectReturnBtn">Reject</button>` : ''}</td>` : ''}
          </tr>`).join('')}</tbody></table>`
       : '<p class="muted">No returns yet.</p>';
@@ -712,10 +728,10 @@ function ordersTable(orders, opts = {}) {
   return `<table>
     <thead><tr><th>Order No</th><th>Date</th><th>Retailer</th>${opts.showEmployee ? '<th>Employee</th>' : ''}${opts.showDistributor ? '<th>Distributor</th>' : ''}<th>Value</th><th>Status</th></tr></thead>
     <tbody>${orders.map((o) => `<tr>
-      <td>${o.order_no}</td><td>${o.order_date}</td><td>${o.retailer_name} (${o.retailer_code})</td>
-      ${opts.showEmployee ? `<td>${o.employee_name}</td>` : ''}
-      ${opts.showDistributor ? `<td>${o.distributor_name}</td>` : ''}
-      <td>${fmtMoney(o.total_amount)}</td><td><span class="badge ${o.status}">${o.status.replace(/_/g, ' ')}</span></td>
+      <td>${esc(o.order_no)}</td><td>${esc(o.order_date)}</td><td>${esc(o.retailer_name)} (${esc(o.retailer_code)})</td>
+      ${opts.showEmployee ? `<td>${esc(o.employee_name)}</td>` : ''}
+      ${opts.showDistributor ? `<td>${esc(o.distributor_name)}</td>` : ''}
+      <td>${fmtMoney(o.total_amount)}</td><td><span class="badge ${esc(o.status)}">${o.status.replace(/_/g, ' ')}</span></td>
     </tr>`).join('')}</tbody></table>`;
 }
 
@@ -729,10 +745,10 @@ async function renderOrderBook() {
       <p class="section-title">Today's Order Book — ${date}</p>
       <table>
         <thead><tr><th>Order No</th><th>Retailer</th><th>Sales Employee</th><th>Value</th><th>Status</th><th>Action</th></tr></thead>
-        <tbody>${orders.map((o) => `<tr data-id="${o.id}" data-status="${o.status}">
-          <td>${o.order_no}</td><td>${o.retailer_name}</td><td>${o.employee_name}</td>
+        <tbody>${orders.map((o) => `<tr data-id="${esc(o.id)}" data-status="${esc(o.status)}">
+          <td>${esc(o.order_no)}</td><td>${esc(o.retailer_name)}</td><td>${esc(o.employee_name)}</td>
           <td>${fmtMoney(o.total_amount)}</td>
-          <td><span class="badge ${o.status}">${o.status.replace(/_/g, ' ')}</span></td>
+          <td><span class="badge ${esc(o.status)}">${o.status.replace(/_/g, ' ')}</span></td>
           <td>${STATUS_NEXT[o.status] ? `<button class="btn small advanceBtn">Mark ${STATUS_NEXT[o.status].replace(/_/g, ' ')}</button>` : ''}
               ${o.status === 'submitted' ? `<button class="btn small secondary cancelBtn">Cancel</button>` : ''}</td>
         </tr>`).join('')}</tbody>
@@ -769,7 +785,7 @@ async function renderConsolidated() {
       <p class="section-title">Consolidated Picking List — ${date}</p>
       <table>
         <thead><tr><th>SKU</th><th>Product</th><th>Pack</th><th>Pick as</th><th>Total Qty (packs)</th><th>Orders</th><th>Total Value</th></tr></thead>
-        <tbody>${data.sku_summary.map((s) => `<tr><td>${s.sku_code}</td><td>${s.product_name}</td><td>${s.pack_size || ''}</td><td>${s.pick_cartons > 0 ? `${s.pick_cartons} carton${s.pick_cartons > 1 ? 's' : ''}` : ''}${s.pick_cartons > 0 && s.pick_loose_packs > 0 ? ' + ' : ''}${s.pick_loose_packs > 0 ? `${s.pick_loose_packs} loose` : (s.pick_cartons > 0 ? '' : `${s.total_qty} loose`)}</td><td>${s.total_qty}</td><td>${s.order_count}</td><td>${fmtMoney(s.total_value)}</td></tr>`).join('')}</tbody>
+        <tbody>${data.sku_summary.map((s) => `<tr><td>${esc(s.sku_code)}</td><td>${esc(s.product_name)}</td><td>${esc(s.pack_size || '')}</td><td>${s.pick_cartons > 0 ? `${esc(s.pick_cartons)} carton${s.pick_cartons > 1 ? 's' : ''}` : ''}${s.pick_cartons > 0 && s.pick_loose_packs > 0 ? ' + ' : ''}${s.pick_loose_packs > 0 ? `${esc(s.pick_loose_packs)} loose` : (s.pick_cartons > 0 ? '' : `${esc(s.total_qty)} loose`)}</td><td>${esc(s.total_qty)}</td><td>${esc(s.order_count)}</td><td>${fmtMoney(s.total_value)}</td></tr>`).join('')}</tbody>
       </table>
       ${!data.sku_summary.length ? '<p class="muted">No orders to consolidate for today.</p>' : ''}
     </div>`);
@@ -789,18 +805,18 @@ async function renderDeliveries() {
         <p class="muted">Orders accepted by the distributor and not yet delivered. Tap an address to get turn-by-turn directions.</p>
       </div>
       ${orders.length ? orders.map((o) => `
-        <div class="card" data-id="${o.id}">
+        <div class="card" data-id="${esc(o.id)}">
           <div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:8px">
             <div>
-              <p class="section-title" style="margin-bottom:4px">${o.order_no}</p>
-              <p style="margin:0;font-weight:600">${o.retailer_name} (${o.retailer_code})</p>
+              <p class="section-title" style="margin-bottom:4px">${esc(o.order_no)}</p>
+              <p style="margin:0;font-weight:600">${esc(o.retailer_name)} (${esc(o.retailer_code)})</p>
               ${o.retailer_gps_lat && o.retailer_gps_lng
-                ? `<a href="https://www.google.com/maps/dir/?api=1&destination=${o.retailer_gps_lat},${o.retailer_gps_lng}" target="_blank" rel="noopener" style="color:var(--brand)">${o.retailer_address || 'Open in Google Maps'} ↗</a>`
-                : `<span class="muted">${o.retailer_address || 'No address on file'} (no GPS pin saved)</span>`}
-              ${o.retailer_mobile ? `<br/><a href="tel:${o.retailer_mobile}" style="color:var(--brand)">Call ${o.retailer_mobile}</a>` : ''}
+                ? `<a href="https://www.google.com/maps/dir/?api=1&destination=${esc(o.retailer_gps_lat)},${esc(o.retailer_gps_lng)}" target="_blank" rel="noopener" style="color:var(--brand)">${esc(o.retailer_address || 'Open in Google Maps')} ↗</a>`
+                : `<span class="muted">${esc(o.retailer_address || 'No address on file')} (no GPS pin saved)</span>`}
+              ${o.retailer_mobile ? `<br/><a href="tel:${esc(o.retailer_mobile)}" style="color:var(--brand)">Call ${esc(o.retailer_mobile)}</a>` : ''}
             </div>
             <div style="text-align:right">
-              <span class="badge ${o.status}">${o.status.replace(/_/g, ' ')}</span>
+              <span class="badge ${esc(o.status)}">${o.status.replace(/_/g, ' ')}</span>
               <p style="margin:6px 0 0;font-weight:600">${fmtMoney(o.total_amount)}</p>
             </div>
           </div>
@@ -829,9 +845,9 @@ async function renderDashboard() {
   const wrap = el(`
     <div>
       <div class="grid cols-4">
-        <div class="card kpi"><div class="value">${d.orderStats.order_count}</div><div class="label">Today's Orders</div></div>
+        <div class="card kpi"><div class="value">${esc(d.orderStats.order_count)}</div><div class="label">Today's Orders</div></div>
         <div class="card kpi"><div class="value">${fmtMoney(d.orderStats.order_value)}</div><div class="label">Order Value</div></div>
-        <div class="card kpi"><div class="value">${d.retailerStats.new_today}</div><div class="label">New Retailers Today</div></div>
+        <div class="card kpi"><div class="value">${esc(d.retailerStats.new_today)}</div><div class="label">New Retailers Today</div></div>
         <div class="card kpi"><div class="value">${d.visitStats.total_visits || 0}</div><div class="label">Field Visits Today</div></div>
       </div>
       <div class="grid cols-2">
@@ -839,13 +855,13 @@ async function renderDashboard() {
           <p class="section-title">Orders by Distributor</p>
           <div class="chart-box" style="height:180px"><canvas id="chartByDistributor"></canvas></div>
           <table><thead><tr><th>Distributor</th><th>Orders</th><th>Value</th></tr></thead>
-          <tbody>${d.byDistributor.map((r) => `<tr><td>${r.name}</td><td>${r.order_count}</td><td>${fmtMoney(r.order_value)}</td></tr>`).join('')}</tbody></table>
+          <tbody>${d.byDistributor.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.order_count)}</td><td>${fmtMoney(r.order_value)}</td></tr>`).join('')}</tbody></table>
         </div>
         <div class="card">
           <p class="section-title">Orders by Sales Employee</p>
           <div class="chart-box" style="height:180px"><canvas id="chartByEmployee"></canvas></div>
           <table><thead><tr><th>Employee</th><th>Orders</th><th>Value</th></tr></thead>
-          <tbody>${d.byEmployee.map((r) => `<tr><td>${r.name}</td><td>${r.order_count}</td><td>${fmtMoney(r.order_value)}</td></tr>`).join('')}</tbody></table>
+          <tbody>${d.byEmployee.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.order_count)}</td><td>${fmtMoney(r.order_value)}</td></tr>`).join('')}</tbody></table>
         </div>
       </div>
       <div class="grid cols-2">
@@ -853,13 +869,13 @@ async function renderDashboard() {
           <p class="section-title">Top SKUs Today</p>
           <div class="chart-box" style="height:180px"><canvas id="chartTopSkus"></canvas></div>
           <table><thead><tr><th>SKU</th><th>Qty</th><th>Value</th></tr></thead>
-          <tbody>${d.topSkus.map((r) => `<tr><td>${r.name} (${r.sku_code})</td><td>${r.qty}</td><td>${fmtMoney(r.value)}</td></tr>`).join('')}</tbody></table>
+          <tbody>${d.topSkus.map((r) => `<tr><td>${esc(r.name)} (${esc(r.sku_code)})</td><td>${esc(r.qty)}</td><td>${fmtMoney(r.value)}</td></tr>`).join('')}</tbody></table>
         </div>
         <div class="card">
           <p class="section-title">Orders by Status</p>
           <div class="chart-box" style="height:180px"><canvas id="chartByStatus"></canvas></div>
           <table><thead><tr><th>Status</th><th>Count</th><th>Value</th></tr></thead>
-          <tbody>${d.byStatus.map((r) => `<tr><td><span class="badge ${r.status}">${r.status.replace(/_/g, ' ')}</span></td><td>${r.cnt}</td><td>${fmtMoney(r.value)}</td></tr>`).join('')}</tbody></table>
+          <tbody>${d.byStatus.map((r) => `<tr><td><span class="badge ${esc(r.status)}">${r.status.replace(/_/g, ' ')}</span></td><td>${esc(r.cnt)}</td><td>${fmtMoney(r.value)}</td></tr>`).join('')}</tbody></table>
         </div>
       </div>
 
@@ -920,25 +936,25 @@ async function renderDashboard() {
 
     wrap.querySelector('#perfFastSkus').innerHTML = p.fastMovingSkus.length
       ? `<table><thead><tr><th>SKU</th><th>Category</th><th>Qty Sold</th><th>Value</th><th>Orders</th></tr></thead>
-         <tbody>${p.fastMovingSkus.map((r) => `<tr><td>${r.name} (${r.sku_code})</td><td>${r.category || ''}</td><td>${r.total_qty}</td><td>${fmtMoney(r.total_value)}</td><td>${r.order_count}</td></tr>`).join('')}</tbody></table>`
+         <tbody>${p.fastMovingSkus.map((r) => `<tr><td>${esc(r.name)} (${esc(r.sku_code)})</td><td>${esc(r.category || '')}</td><td>${esc(r.total_qty)}</td><td>${fmtMoney(r.total_value)}</td><td>${esc(r.order_count)}</td></tr>`).join('')}</tbody></table>`
       : '<p class="muted">No orders in this period yet.</p>';
     drawBarChart(wrap.querySelector('#chartFastSkus'), p.fastMovingSkus.map((r) => r.name), p.fastMovingSkus.map((r) => Number(r.total_qty)), { label: 'Qty sold', color: '#1b8a5a' });
 
     wrap.querySelector('#perfTerritories').innerHTML = p.byTerritory.length
       ? `<table><thead><tr><th>Territory</th><th>Orders</th><th>Retailers</th><th>Value</th></tr></thead>
-         <tbody>${p.byTerritory.map((r) => `<tr><td>${r.name}</td><td>${r.order_count}</td><td>${r.retailer_count}</td><td>${fmtMoney(r.order_value)}</td></tr>`).join('')}</tbody></table>`
+         <tbody>${p.byTerritory.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.order_count)}</td><td>${esc(r.retailer_count)}</td><td>${fmtMoney(r.order_value)}</td></tr>`).join('')}</tbody></table>`
       : '<p class="muted">No territories yet.</p>';
     drawBarChart(wrap.querySelector('#chartTerritories'), p.byTerritory.map((r) => r.name), p.byTerritory.map((r) => Number(r.order_value)), { label: 'Order value', tooltipFormatter: fmtMoney, colorful: true });
 
     wrap.querySelector('#perfEmployees').innerHTML = p.topEmployees.length
       ? `<table><thead><tr><th>Employee</th><th>Orders</th><th>Retailers</th><th>Value</th></tr></thead>
-         <tbody>${p.topEmployees.map((r) => `<tr><td>${r.name} (${r.code})</td><td>${r.order_count}</td><td>${r.retailer_count}</td><td>${fmtMoney(r.order_value)}</td></tr>`).join('')}</tbody></table>`
+         <tbody>${p.topEmployees.map((r) => `<tr><td>${esc(r.name)} (${esc(r.code)})</td><td>${esc(r.order_count)}</td><td>${esc(r.retailer_count)}</td><td>${fmtMoney(r.order_value)}</td></tr>`).join('')}</tbody></table>`
       : '<p class="muted">No employees yet.</p>';
     drawBarChart(wrap.querySelector('#chartEmployees'), p.topEmployees.map((r) => r.name), p.topEmployees.map((r) => Number(r.order_value)), { label: 'Order value', tooltipFormatter: fmtMoney, colorful: true });
 
     wrap.querySelector('#perfDistributors').innerHTML = p.topDistributors.length
       ? `<table><thead><tr><th>Distributor</th><th>Orders</th><th>Value</th></tr></thead>
-         <tbody>${p.topDistributors.map((r) => `<tr><td>${r.name} (${r.code})</td><td>${r.order_count}</td><td>${fmtMoney(r.order_value)}</td></tr>`).join('')}</tbody></table>`
+         <tbody>${p.topDistributors.map((r) => `<tr><td>${esc(r.name)} (${esc(r.code)})</td><td>${esc(r.order_count)}</td><td>${fmtMoney(r.order_value)}</td></tr>`).join('')}</tbody></table>`
       : '<p class="muted">No distributors yet.</p>';
     drawBarChart(wrap.querySelector('#chartDistributors'), p.topDistributors.map((r) => r.name), p.topDistributors.map((r) => Number(r.order_value)), { label: 'Order value', tooltipFormatter: fmtMoney, colorful: true });
 
@@ -947,11 +963,11 @@ async function renderDashboard() {
     wrap.querySelector('#perfScheme').innerHTML = `
       <div class="grid cols-3" style="margin-bottom:12px">
         <div class="kpi"><div class="value">${fmtMoney(s.total_discount)}</div><div class="label">Total Discount Given</div></div>
-        <div class="kpi"><div class="value">${s.orders_with_discount}</div><div class="label">Orders with Discount</div></div>
+        <div class="kpi"><div class="value">${esc(s.orders_with_discount)}</div><div class="label">Orders with Discount</div></div>
         <div class="kpi"><div class="value">${s.total_orders ? Math.round((s.orders_with_discount / s.total_orders) * 100) : 0}%</div><div class="label">Orders Using a Scheme</div></div>
       </div>
       ${s.bySku.length
-        ? `<table><thead><tr><th>SKU</th><th>Discount Given</th><th>Orders</th></tr></thead><tbody>${s.bySku.map((r) => `<tr><td>${r.name} (${r.sku_code})</td><td>${fmtMoney(r.total_discount)}</td><td>${r.order_count}</td></tr>`).join('')}</tbody></table>`
+        ? `<table><thead><tr><th>SKU</th><th>Discount Given</th><th>Orders</th></tr></thead><tbody>${s.bySku.map((r) => `<tr><td>${esc(r.name)} (${esc(r.sku_code)})</td><td>${fmtMoney(r.total_discount)}</td><td>${esc(r.order_count)}</td></tr>`).join('')}</tbody></table>`
         : '<p class="muted">No discounts recorded in this period yet — order booking doesn\'t currently have a discount field, so this fills in once that\'s added.</p>'}
     `;
   }
@@ -1224,7 +1240,7 @@ async function renderMasters() {
     const rows = await api('/territories');
     territoriesCache = rows;
     const box = wrap.querySelector('#territoryList');
-    box.innerHTML = `<table><thead><tr><th>Name</th><th>State</th><th>Districts</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr data-id="${r.id}"><td>${r.name}</td><td>${(r.districts && r.districts[0]) ? r.districts[0].state : (r.state || '')}</td><td>${(r.districts || []).map((d) => d.district).join(', ')}</td><td><button class="btn small secondary delTerritoryBtn">Delete</button></td></tr>`).join('')}</tbody></table>`;
+    box.innerHTML = `<table><thead><tr><th>Name</th><th>State</th><th>Districts</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}"><td>${esc(r.name)}</td><td>${esc((r.districts && r.districts[0]) ? r.districts[0].state : (r.state || ''))}</td><td>${esc((r.districts || []).map((d) => d.district).join(', '))}</td><td><button class="btn small secondary delTerritoryBtn">Delete</button></td></tr>`).join('')}</tbody></table>`;
     box.querySelectorAll('.delTerritoryBtn').forEach((btn) => {
       btn.onclick = async () => {
         if (!confirm('Delete this territory?')) return;
@@ -1234,13 +1250,13 @@ async function renderMasters() {
         } catch (e) { alert(e.message); }
       };
     });
-    wrap.querySelector('#mdTerritory').innerHTML = '<option value="">-- none --</option>' + rows.map((r) => `<option value="${r.id}">${r.name}</option>`).join('');
+    wrap.querySelector('#mdTerritory').innerHTML = '<option value="">-- none --</option>' + rows.map((r) => `<option value="${esc(r.id)}">${esc(r.name)}</option>`).join('');
     return rows;
   }
   async function loadDistributors() {
     const rows = await api('/distributors');
     const box = wrap.querySelector('#distributorList');
-    box.innerHTML = `<table><thead><tr><th>Code</th><th>Name</th><th>Mobile</th><th>Territory</th><th>Mandals</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr data-id="${r.id}"><td>${r.code}</td><td>${r.name}</td><td>${r.mobile}</td><td>${r.territory_name || ''}</td><td>${r.mandals || ''}</td><td><button class="btn small secondary delDistributorBtn">Delete</button></td></tr>`).join('')}</tbody></table>`;
+    box.innerHTML = `<table><thead><tr><th>Code</th><th>Name</th><th>Mobile</th><th>Territory</th><th>Mandals</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}"><td>${esc(r.code)}</td><td>${esc(r.name)}</td><td>${esc(r.mobile)}</td><td>${esc(r.territory_name || '')}</td><td>${esc(r.mandals || '')}</td><td><button class="btn small secondary delDistributorBtn">Delete</button></td></tr>`).join('')}</tbody></table>`;
     box.querySelectorAll('.delDistributorBtn').forEach((btn) => {
       btn.onclick = async () => {
         if (!confirm('Delete this distributor?')) return;
@@ -1250,14 +1266,14 @@ async function renderMasters() {
         } catch (e) { alert(e.message); }
       };
     });
-    wrap.querySelector('#meDistributor').innerHTML = rows.map((r) => `<option value="${r.id}">${r.name}</option>`).join('');
+    wrap.querySelector('#meDistributor').innerHTML = rows.map((r) => `<option value="${esc(r.id)}">${esc(r.name)}</option>`).join('');
     return rows;
   }
   let beatRetailerOrder = []; // tracks check order, not DOM order, so "order you check them" is honored
   async function loadBeatFormOptions() {
-    wrap.querySelector('#btTerritory').innerHTML = '<option value="">-- any --</option>' + territoriesCache.map((t) => `<option value="${t.id}">${t.name}</option>`).join('');
+    wrap.querySelector('#btTerritory').innerHTML = '<option value="">-- any --</option>' + territoriesCache.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');
     const employees = await api('/employees');
-    wrap.querySelector('#btEmployee').innerHTML = '<option value="">-- unassigned --</option>' + employees.map((e) => `<option value="${e.id}">${e.name} (${e.code})</option>`).join('');
+    wrap.querySelector('#btEmployee').innerHTML = '<option value="">-- unassigned --</option>' + employees.map((e) => `<option value="${esc(e.id)}">${esc(e.name)} (${esc(e.code)})</option>`).join('');
     await renderBeatRetailerChecks();
   }
   async function renderBeatRetailerChecks() {
@@ -1266,7 +1282,7 @@ async function renderMasters() {
     beatRetailerOrder = [];
     const box = wrap.querySelector('#btRetailerChecks');
     box.innerHTML = retailers.length
-      ? retailers.map((r) => `<label style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer"><input type="checkbox" class="btRetailerCheck" value="${r.id}" style="width:auto"/> ${r.name} (${r.code})</label>`).join('')
+      ? retailers.map((r) => `<label style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer"><input type="checkbox" class="btRetailerCheck" value="${esc(r.id)}" style="width:auto"/> ${esc(r.name)} (${esc(r.code)})</label>`).join('')
       : '<div class="muted" style="padding:8px 10px">No retailers found for that territory.</div>';
     box.querySelectorAll('.btRetailerCheck').forEach((cb) => {
       cb.onchange = () => {
@@ -1283,9 +1299,9 @@ async function renderMasters() {
     const box = wrap.querySelector('#beatList');
     box.innerHTML = rows.length
       ? `<table><thead><tr><th>Name</th><th>Territory</th><th>Employee</th><th>Days</th><th>Retailers</th><th></th></tr></thead>
-         <tbody>${rows.map((r) => `<tr data-id="${r.id}">
-           <td>${r.name}</td><td>${r.territory_name || ''}</td><td>${r.employee_name ? `${r.employee_name} (${r.employee_code})` : ''}</td>
-           <td>${r.days.join(', ')}</td><td>${r.retailer_count}</td>
+         <tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}">
+           <td>${esc(r.name)}</td><td>${esc(r.territory_name || '')}</td><td>${r.employee_name ? `${esc(r.employee_name)} (${esc(r.employee_code)})` : ''}</td>
+           <td>${esc(r.days.join(', '))}</td><td>${esc(r.retailer_count)}</td>
            <td><button class="btn small secondary delBeatBtn">Delete</button></td>
          </tr>`).join('')}</tbody></table>`
       : '<p class="muted">No beats yet.</p>';
@@ -1321,9 +1337,9 @@ async function renderMasters() {
     const rows = await api('/employees');
     const box = wrap.querySelector('#employeeList');
     box.innerHTML = `<table><thead><tr><th>Code</th><th>Name</th><th>Mobile</th><th>Distributors</th><th>Status</th><th></th></tr></thead>
-      <tbody>${rows.map((r) => `<tr data-id="${r.id}">
-        <td>${r.code}</td><td>${r.name}</td><td>${r.mobile}</td><td>${r.distributors || ''}</td>
-        <td><span class="badge ${r.status === 'active' ? 'delivered' : 'cancelled'}">${r.status}</span></td>
+      <tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}">
+        <td>${esc(r.code)}</td><td>${esc(r.name)}</td><td>${esc(r.mobile)}</td><td>${esc(r.distributors || '')}</td>
+        <td><span class="badge ${r.status === 'active' ? 'delivered' : 'cancelled'}">${esc(r.status)}</span></td>
         <td>
           <button class="btn small secondary editEmployeeBtn">Edit</button>
           ${r.status === 'active' ? '<button class="btn small secondary toggleEmpBtn" data-next="inactive">Deactivate</button>' : '<button class="btn small secondary toggleEmpBtn" data-next="active">Reactivate</button>'}
@@ -1350,11 +1366,11 @@ async function renderMasters() {
     const editBox = wrap.querySelector('#editEmployeeBox');
     editBox.innerHTML = `
       <div class="card" style="border-color:var(--brand)">
-        <p class="section-title">Edit Employee — ${emp.code}</p>
+        <p class="section-title">Edit Employee — ${esc(emp.code)}</p>
         <div class="grid cols-3">
-          <div class="field"><label>Name</label><input id="eeName" value="${emp.name}" /></div>
-          <div class="field"><label>Mobile</label><input id="eeMobile" value="${emp.mobile}" /></div>
-          <div class="field"><label>Designation</label><input id="eeDesignation" value="${emp.designation || ''}" /></div>
+          <div class="field"><label>Name</label><input id="eeName" value="${esc(emp.name)}" /></div>
+          <div class="field"><label>Mobile</label><input id="eeMobile" value="${esc(emp.mobile)}" /></div>
+          <div class="field"><label>Designation</label><input id="eeDesignation" value="${esc(emp.designation || '')}" /></div>
           <div class="field"><label>Assigned Distributor</label><select id="eeDistributor">${wrap.querySelector('#meDistributor').innerHTML}</select></div>
           <div class="field"><label>Status</label>
             <select id="eeStatus"><option value="active" ${emp.status === 'active' ? 'selected' : ''}>Active</option><option value="inactive" ${emp.status === 'inactive' ? 'selected' : ''}>Inactive</option></select>
@@ -1381,7 +1397,7 @@ async function renderMasters() {
   let mandalsCache = [];
   function renderMandalTable() {
     const box = wrap.querySelector('#mandalList');
-    box.innerHTML = `<table><thead><tr><th>Name</th><th>State</th><th>District</th><th></th></tr></thead><tbody>${mandalsCache.map((r) => `<tr data-id="${r.id}"><td>${r.name}</td><td>${r.state}</td><td>${r.district}</td><td><button class="btn small secondary delMandalBtn">Delete</button></td></tr>`).join('')}</tbody></table>`;
+    box.innerHTML = `<table><thead><tr><th>Name</th><th>State</th><th>District</th><th></th></tr></thead><tbody>${mandalsCache.map((r) => `<tr data-id="${esc(r.id)}"><td>${esc(r.name)}</td><td>${esc(r.state)}</td><td>${esc(r.district)}</td><td><button class="btn small secondary delMandalBtn">Delete</button></td></tr>`).join('')}</tbody></table>`;
     box.querySelectorAll('.delMandalBtn').forEach((btn) => {
       btn.onclick = async () => {
         if (!confirm('Delete this mandal?')) return;
@@ -1445,12 +1461,12 @@ async function renderMasters() {
     box.innerHTML = '<p class="muted">Loading credit status...</p>';
     const rows = await api('/retailers/credit-summary'); // one bulk query, not one request per retailer
     box.innerHTML = `<table><thead><tr><th>Retailer</th><th>Distributor</th><th>Credit Limit</th><th>Terms (days)</th><th>Outstanding</th><th>Status</th><th></th></tr></thead>
-      <tbody>${rows.map((r) => `<tr data-id="${r.id}">
-          <td>${r.name} (${r.code})</td><td>${r.distributor_name || ''}</td>
-          <td><input class="crLimit" type="number" step="0.01" value="${r.credit_limit}" style="width:100px" /></td>
-          <td><input class="crTerms" type="number" min="0" value="${r.payment_terms_days}" style="width:70px" /></td>
+      <tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}">
+          <td>${esc(r.name)} (${esc(r.code)})</td><td>${esc(r.distributor_name || '')}</td>
+          <td><input class="crLimit" type="number" step="0.01" value="${esc(r.credit_limit)}" style="width:100px" /></td>
+          <td><input class="crTerms" type="number" min="0" value="${esc(r.payment_terms_days)}" style="width:70px" /></td>
           <td>${fmtMoney(r.outstanding_balance)}</td>
-          <td>${r.is_overdue ? `<span class="badge cancelled">Overdue since ${r.oldest_overdue_date}</span>` : '<span class="badge delivered">OK</span>'}</td>
+          <td>${r.is_overdue ? `<span class="badge cancelled">Overdue since ${esc(r.oldest_overdue_date)}</span>` : '<span class="badge delivered">OK</span>'}</td>
           <td><button class="btn small secondary saveCreditBtn">Save</button></td>
         </tr>`).join('')}</tbody></table>`;
     box.querySelectorAll('.saveCreditBtn').forEach((btn) => {
@@ -1465,7 +1481,7 @@ async function renderMasters() {
         } catch (e) { alert(e.message); }
       };
     });
-    wrap.querySelector('#pmtRetailer').innerHTML = rows.map((r) => `<option value="${r.id}">${r.name} (${r.code})</option>`).join('');
+    wrap.querySelector('#pmtRetailer').innerHTML = rows.map((r) => `<option value="${esc(r.id)}">${esc(r.name)} (${esc(r.code)})</option>`).join('');
   }
 
   async function loadPaymentHistory() {
@@ -1473,7 +1489,7 @@ async function renderMasters() {
     const box = wrap.querySelector('#paymentList');
     box.innerHTML = rows.length
       ? `<table><thead><tr><th>Date</th><th>Retailer</th><th>Amount</th><th>Method</th><th>Reference</th><th></th></tr></thead>
-         <tbody>${rows.map((r) => `<tr data-id="${r.id}"><td>${r.payment_date}</td><td>${r.retailer_name} (${r.retailer_code})</td><td>${fmtMoney(r.amount)}</td><td>${r.method || ''}</td><td>${r.reference || ''}</td><td><button class="btn small secondary delPaymentBtn">Delete</button></td></tr>`).join('')}</tbody></table>`
+         <tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}"><td>${esc(r.payment_date)}</td><td>${esc(r.retailer_name)} (${esc(r.retailer_code)})</td><td>${fmtMoney(r.amount)}</td><td>${esc(r.method || '')}</td><td>${esc(r.reference || '')}</td><td><button class="btn small secondary delPaymentBtn">Delete</button></td></tr>`).join('')}</tbody></table>`
       : '<p class="muted">No payments recorded yet.</p>';
     box.querySelectorAll('.delPaymentBtn').forEach((btn) => {
       btn.onclick = async () => {
@@ -1508,23 +1524,23 @@ async function renderMasters() {
 
   async function loadSchemeFormOptions() {
     const [products, distributors] = await Promise.all([api('/products'), api('/distributors')]);
-    wrap.querySelector('#msProduct').innerHTML = '<option value="">-- All Products --</option>' + products.map((p) => `<option value="${p.id}">${p.name} (${p.sku_code})</option>`).join('');
-    wrap.querySelector('#msDistributor').innerHTML = '<option value="">-- All Distributors --</option>' + distributors.map((d) => `<option value="${d.id}">${d.name}</option>`).join('');
-    wrap.querySelector('#msTerritory').innerHTML = '<option value="">-- All Territories --</option>' + territoriesCache.map((t) => `<option value="${t.id}">${t.name}</option>`).join('');
+    wrap.querySelector('#msProduct').innerHTML = '<option value="">-- All Products --</option>' + products.map((p) => `<option value="${esc(p.id)}">${esc(p.name)} (${esc(p.sku_code)})</option>`).join('');
+    wrap.querySelector('#msDistributor').innerHTML = '<option value="">-- All Distributors --</option>' + distributors.map((d) => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join('');
+    wrap.querySelector('#msTerritory').innerHTML = '<option value="">-- All Territories --</option>' + territoriesCache.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');
   }
   async function loadSchemes() {
     const rows = await api('/schemes');
     const box = wrap.querySelector('#schemeList');
     box.innerHTML = `<table><thead><tr><th>Name</th><th>Discount</th><th>Min Qty</th><th>Product</th><th>Territory</th><th>Distributor</th><th>Valid</th><th>Status</th><th></th></tr></thead>
-      <tbody>${rows.map((r) => `<tr data-id="${r.id}">
-        <td>${r.name}</td>
+      <tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}">
+        <td>${esc(r.name)}</td>
         <td>${r.discount_type === 'percent' ? Number(r.discount_value) + '%' : fmtMoney(r.discount_value) + '/pack'}</td>
-        <td>${r.min_qty}</td>
-        <td>${r.product_name ? `${r.product_name} (${r.sku_code})` : 'All'}</td>
-        <td>${r.territory_name || 'All'}</td>
-        <td>${r.distributor_name || 'All'}</td>
-        <td>${r.valid_from || '…'} to ${r.valid_to || '…'}</td>
-        <td><span class="badge ${r.status === 'active' ? 'delivered' : 'cancelled'}">${r.status}</span></td>
+        <td>${esc(r.min_qty)}</td>
+        <td>${r.product_name ? `${esc(r.product_name)} (${esc(r.sku_code)})` : 'All'}</td>
+        <td>${esc(r.territory_name || 'All')}</td>
+        <td>${esc(r.distributor_name || 'All')}</td>
+        <td>${esc(r.valid_from || '…')} to ${esc(r.valid_to || '…')}</td>
+        <td><span class="badge ${r.status === 'active' ? 'delivered' : 'cancelled'}">${esc(r.status)}</span></td>
         <td>
           <button class="btn small secondary toggleSchemeBtn" data-next="${r.status === 'active' ? 'inactive' : 'active'}">${r.status === 'active' ? 'Deactivate' : 'Reactivate'}</button>
           <button class="btn small secondary delSchemeBtn">Delete</button>
@@ -1571,7 +1587,7 @@ async function renderMasters() {
   async function loadCategories() {
     const rows = await api('/categories');
     const box = wrap.querySelector('#categoryList');
-    box.innerHTML = `<table><thead><tr><th>Name</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr data-id="${r.id}"><td>${r.name}</td><td>
+    box.innerHTML = `<table><thead><tr><th>Name</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}"><td>${esc(r.name)}</td><td>
       <button class="btn small secondary renameCatBtn">Rename</button>
       <button class="btn small secondary delCatBtn">Delete</button>
     </td></tr>`).join('')}</tbody></table>`;
@@ -1594,7 +1610,7 @@ async function renderMasters() {
         loadCategories();
       };
     });
-    wrap.querySelector('#mpCategory').innerHTML = '<option value="">-- none --</option>' + rows.map((r) => `<option value="${r.name}">${r.name}</option>`).join('');
+    wrap.querySelector('#mpCategory').innerHTML = '<option value="">-- none --</option>' + rows.map((r) => `<option value="${esc(r.name)}">${esc(r.name)}</option>`).join('');
     return rows;
   }
 
@@ -1627,8 +1643,8 @@ async function renderMasters() {
     const rows = await api('/products');
     const box = wrap.querySelector('#productList');
     box.innerHTML = `<table><thead><tr><th>SKU</th><th>Name</th><th>Category</th><th>MRP</th><th>Retailer Price</th><th>Distributor Price</th><th>GST%</th><th>Packs/Carton</th><th></th></tr></thead>
-      <tbody>${rows.map((r) => `<tr data-id="${r.id}">
-        <td>${r.sku_code}</td><td>${r.name}</td><td>${r.category || ''}</td><td>${fmtMoney(r.mrp)}</td><td>${fmtMoney(r.retailer_price)}</td><td>${fmtMoney(r.distributor_price)}</td><td>${r.gst_pct}</td><td>${r.units_per_carton}</td>
+      <tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}">
+        <td>${esc(r.sku_code)}</td><td>${esc(r.name)}</td><td>${esc(r.category || '')}</td><td>${fmtMoney(r.mrp)}</td><td>${fmtMoney(r.retailer_price)}</td><td>${fmtMoney(r.distributor_price)}</td><td>${esc(r.gst_pct)}</td><td>${esc(r.units_per_carton)}</td>
         <td><button class="btn small secondary editProductBtn">Edit</button> <button class="btn small secondary delProductBtn">Delete</button></td>
       </tr>`).join('')}</tbody></table>`;
 
@@ -1654,16 +1670,16 @@ async function renderMasters() {
     const editBox = wrap.querySelector('#editProductBox');
     editBox.innerHTML = `
       <div class="card" style="border-color:var(--brand)">
-        <p class="section-title">Edit Product — ${p.sku_code}</p>
+        <p class="section-title">Edit Product — ${esc(p.sku_code)}</p>
         <div class="grid cols-4">
-          <div class="field"><label>Name</label><input id="epName" value="${p.name}" /></div>
+          <div class="field"><label>Name</label><input id="epName" value="${esc(p.name)}" /></div>
           <div class="field"><label>Category</label><select id="epCategory">${wrap.querySelector('#mpCategory').innerHTML}</select></div>
-          <div class="field"><label>Pack Size</label><input id="epPack" value="${p.pack_size || ''}" /></div>
-          <div class="field"><label>MRP (incl. GST)</label><input id="epMrp" type="number" value="${p.mrp}" /></div>
-          <div class="field"><label>Retailer Margin %</label><input id="epRetailerMargin" type="number" step="0.01" value="${p.retailer_margin_pct}" /></div>
-          <div class="field"><label>Distributor Margin %</label><input id="epDistMargin" type="number" step="0.01" value="${p.distributor_margin_pct}" /></div>
-          <div class="field"><label>GST %</label><input id="epGst" type="number" value="${p.gst_pct}" /></div>
-          <div class="field"><label>Packs per Carton</label><input id="epUnitsPerCarton" type="number" min="1" value="${p.units_per_carton}" /></div>
+          <div class="field"><label>Pack Size</label><input id="epPack" value="${esc(p.pack_size || '')}" /></div>
+          <div class="field"><label>MRP (incl. GST)</label><input id="epMrp" type="number" value="${esc(p.mrp)}" /></div>
+          <div class="field"><label>Retailer Margin %</label><input id="epRetailerMargin" type="number" step="0.01" value="${esc(p.retailer_margin_pct)}" /></div>
+          <div class="field"><label>Distributor Margin %</label><input id="epDistMargin" type="number" step="0.01" value="${esc(p.distributor_margin_pct)}" /></div>
+          <div class="field"><label>GST %</label><input id="epGst" type="number" value="${esc(p.gst_pct)}" /></div>
+          <div class="field"><label>Packs per Carton</label><input id="epUnitsPerCarton" type="number" min="1" value="${esc(p.units_per_carton)}" /></div>
           <div class="field"><label>Status</label>
             <select id="epStatus"><option value="active" ${p.status === 'active' ? 'selected' : ''}>Active</option><option value="inactive" ${p.status === 'inactive' ? 'selected' : ''}>Inactive</option></select>
           </div>
@@ -1722,7 +1738,7 @@ async function renderMasters() {
       districtSel.innerHTML = '<option value="">-- select territory first --</option>';
       return;
     }
-    districtSel.innerHTML = '<option value="">-- select district --</option>' + territory.districts.map((d) => `<option value="${d.district}">${d.district}</option>`).join('');
+    districtSel.innerHTML = '<option value="">-- select district --</option>' + territory.districts.map((d) => `<option value="${esc(d.district)}">${esc(d.district)}</option>`).join('');
   };
 
   wrap.querySelector('#mdDistrict').onchange = async (e) => {
@@ -1730,8 +1746,8 @@ async function renderMasters() {
     if (!e.target.value) { mandalBox.innerHTML = '<div class="muted" style="padding:8px 10px">Select a territory and district first.</div>'; return; }
     const mandals = await api(`/mandals?districts=${encodeURIComponent(e.target.value)}`);
     mandalBox.innerHTML = mandals.length
-      ? mandals.map((m) => `<label style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer"><input type="checkbox" class="mdMandalCheck" value="${m.id}" style="width:auto"/> ${m.name}</label>`).join('')
-      : `<div class="muted" style="padding:8px 10px">No mandals added yet for ${e.target.value} — add some under Mandals above.</div>`;
+      ? mandals.map((m) => `<label style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer"><input type="checkbox" class="mdMandalCheck" value="${esc(m.id)}" style="width:auto"/> ${esc(m.name)}</label>`).join('')
+      : `<div class="muted" style="padding:8px 10px">No mandals added yet for ${esc(e.target.value)} — add some under Mandals above.</div>`;
   };
 
   wrap.querySelector('#addDistributor').onclick = async () => {
@@ -1780,9 +1796,9 @@ async function renderMasters() {
     const rows = await api('/users');
     const box = wrap.querySelector('#loginList');
     box.innerHTML = `<table><thead><tr><th>Name</th><th>Mobile</th><th>Role</th><th>Linked To</th><th>Status</th><th></th></tr></thead>
-      <tbody>${rows.map((r) => `<tr data-id="${r.id}">
-        <td>${r.name}</td><td>${r.mobile}</td><td>${r.role.replace(/_/g, ' ')}</td><td>${r.employee_name || r.distributor_name || ''}</td>
-        <td><span class="badge ${r.status === 'active' ? 'delivered' : 'cancelled'}">${r.status}</span></td>
+      <tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}">
+        <td>${esc(r.name)}</td><td>${esc(r.mobile)}</td><td>${r.role.replace(/_/g, ' ')}</td><td>${esc(r.employee_name || r.distributor_name || '')}</td>
+        <td><span class="badge ${r.status === 'active' ? 'delivered' : 'cancelled'}">${esc(r.status)}</span></td>
         <td>${r.status === 'active' ? '<button class="btn small secondary toggleLoginBtn" data-next="inactive">Deactivate</button>' : '<button class="btn small secondary toggleLoginBtn" data-next="active">Reactivate</button>'}</td>
       </tr>`).join('')}</tbody></table>`;
     box.querySelectorAll('.toggleLoginBtn').forEach((btn) => {
@@ -1795,11 +1811,11 @@ async function renderMasters() {
   }
   async function loadEmployeeOptions() {
     const rows = await api('/employees');
-    wrap.querySelector('#ulEmployee').innerHTML = '<option value="">-- select employee --</option>' + rows.map((r) => `<option value="${r.id}">${r.name} (${r.code})</option>`).join('');
+    wrap.querySelector('#ulEmployee').innerHTML = '<option value="">-- select employee --</option>' + rows.map((r) => `<option value="${esc(r.id)}">${esc(r.name)} (${esc(r.code)})</option>`).join('');
   }
   async function loadDistributorOptions() {
     const rows = await api('/distributors');
-    wrap.querySelector('#ulDistributor').innerHTML = '<option value="">-- select distributor --</option>' + rows.map((r) => `<option value="${r.id}">${r.name} (${r.code})</option>`).join('');
+    wrap.querySelector('#ulDistributor').innerHTML = '<option value="">-- select distributor --</option>' + rows.map((r) => `<option value="${esc(r.id)}">${esc(r.name)} (${esc(r.code)})</option>`).join('');
   }
 
   function syncLoginRoleFields() {

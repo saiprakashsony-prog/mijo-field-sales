@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../db');
 const { authRequired, allowRoles } = require('../middleware/auth');
+const { safeMsg } = require('../middleware/safeError');
 
 const router = express.Router();
 router.use(authRequired);
@@ -42,7 +43,7 @@ router.post('/', allowRoles('super_admin', 'management'), async (req, res) => {
     res.status(201).json({ id: territoryId });
   } catch (e) {
     await conn.rollback();
-    res.status(400).json({ error: e.message });
+    res.status(400).json({ error: safeMsg(e) });
   } finally {
     conn.release();
   }

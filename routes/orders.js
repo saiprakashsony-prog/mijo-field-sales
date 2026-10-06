@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../db');
 const { authRequired, allowRoles } = require('../middleware/auth');
+const { safeMsg } = require('../middleware/safeError');
 const { findBestScheme } = require('./schemes');
 const { computeCreditStatus } = require('./retailers');
 
@@ -166,7 +167,7 @@ router.post('/', async (req, res) => {
     res.status(201).json({ id: orderId, order_no: orderNo, total_amount: total, distributor_id: distributorId, credit_warning: creditWarning });
   } catch (e) {
     await conn.rollback();
-    res.status(400).json({ error: e.message });
+    res.status(400).json({ error: safeMsg(e) });
   } finally {
     conn.release();
   }
@@ -214,7 +215,7 @@ router.patch('/:id/status', allowRoles('distributor', 'delivery_executive', 'sup
     res.json({ ok: true });
   } catch (e) {
     await conn.rollback();
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: safeMsg(e) });
   } finally {
     conn.release();
   }

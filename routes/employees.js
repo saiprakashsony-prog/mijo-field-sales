@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../db');
-const { authRequired, allowRoles } = require('../middleware/auth');
+const { authRequired, allowRoles, clearAuthCache } = require('../middleware/auth');
+const { safeMsg } = require('../middleware/safeError');
 
 const router = express.Router();
 router.use(authRequired);
@@ -47,7 +48,7 @@ router.post('/', allowRoles('super_admin', 'management'), async (req, res) => {
     res.status(201).json({ id: employeeId, code });
   } catch (e) {
     await conn.rollback();
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: safeMsg(e) });
   } finally {
     conn.release();
   }
@@ -56,6 +57,7 @@ router.post('/', allowRoles('super_admin', 'management'), async (req, res) => {
 router.patch('/:id/status', allowRoles('super_admin', 'management'), async (req, res) => {
   const { status } = req.body;
   await pool.query('UPDATE employees SET status = ? WHERE id = ?', [status, req.params.id]);
+  clearAuthCache();
   res.json({ ok: true });
 });
 
@@ -77,6 +79,7 @@ router.patch('/:id', allowRoles('super_admin', 'management'), async (req, res) =
     if (updates.length) {
       values.push(req.params.id);
       await conn.query(`UPDATE employees SET ${updates.join(', ')} WHERE id = ?`, values);
+      clearAuthCache(); // the edit may include a status change
     }
 
     if (Array.isArray(distributor_ids)) {
@@ -94,7 +97,7 @@ router.patch('/:id', allowRoles('super_admin', 'management'), async (req, res) =
     res.json({ ok: true });
   } catch (e) {
     await conn.rollback();
-    res.status(400).json({ error: e.message });
+    res.status(400).json({ error: safeMsg(e) });
   } finally {
     conn.release();
   }

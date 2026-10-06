@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../db');
 const { authRequired, allowRoles } = require('../middleware/auth');
+const { safeMsg } = require('../middleware/safeError');
 
 const router = express.Router();
 router.use(authRequired);
@@ -40,7 +41,7 @@ router.post('/', allowRoles('super_admin', 'management'), async (req, res) => {
     res.status(201).json({ id: result.insertId });
   } catch (e) {
     if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'SKU code already exists' });
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: safeMsg(e) });
   }
 });
 

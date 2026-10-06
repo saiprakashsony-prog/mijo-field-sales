@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const pool = require('../db');
 const { authRequired, allowRoles } = require('../middleware/auth');
+const { safeMsg } = require('../middleware/safeError');
 
 const router = express.Router();
 router.use(authRequired);
@@ -29,7 +30,7 @@ router.post('/bulk-import-tg-ap', allowRoles('super_admin', 'management'), async
     res.json({ ok: true, total_in_file: seed.length, newly_inserted: inserted });
   } catch (e) {
     await conn.rollback();
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: safeMsg(e) });
   } finally {
     conn.release();
   }

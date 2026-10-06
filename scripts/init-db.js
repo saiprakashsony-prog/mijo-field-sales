@@ -8,8 +8,14 @@ const bcrypt = require('bcryptjs');
 const mysql = require('mysql2/promise');
 require('dotenv').config();
 
+const crypto = require('crypto');
+
 const ADMIN_MOBILE = '9999999999';
-const ADMIN_PASSWORD = 'admin123'; // change this immediately after first login
+// A brand-new database gets one starter admin so you can sign in. Its password is NEVER a fixed,
+// well-known value: set INITIAL_ADMIN_PASSWORD to choose one, otherwise a random one is generated
+// and printed once in the logs below. Either way, create your real admin and deactivate this one.
+const ADMIN_PASSWORD_IS_GENERATED = !process.env.INITIAL_ADMIN_PASSWORD;
+const ADMIN_PASSWORD = process.env.INITIAL_ADMIN_PASSWORD || crypto.randomBytes(9).toString('base64url');
 
 // Idempotent migrations for databases created before a schema change — each checks
 // information_schema first and only acts if not already applied, so it's safe to run
@@ -89,8 +95,12 @@ async function run() {
       'INSERT INTO users (name, mobile, password_hash, role, status) VALUES (?, ?, ?, ?, ?)',
       ['Super Admin', ADMIN_MOBILE, hash, 'super_admin', 'active']
     );
-    console.log(`Seeded super admin login -> mobile: ${ADMIN_MOBILE}  password: ${ADMIN_PASSWORD}`);
-    console.log('Please log in and change this password / create your real admin user.');
+    if (ADMIN_PASSWORD_IS_GENERATED) {
+      console.log(`Seeded starter admin -> mobile: ${ADMIN_MOBILE}  password: ${ADMIN_PASSWORD}   (shown only once — save it now)`);
+    } else {
+      console.log(`Seeded starter admin -> mobile: ${ADMIN_MOBILE}  (password taken from INITIAL_ADMIN_PASSWORD)`);
+    }
+    console.log('Log in, create your real admin user, then deactivate this starter account.');
   } else {
     console.log('Super admin already exists, skipping seed.');
   }

@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../db');
+const { accountIsActive } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -10,11 +11,12 @@ router.post('/login', async (req, res) => {
   if (!mobile || !password) return res.status(400).json({ error: 'Mobile and password required' });
 
   const [rows] = await pool.query(
-    `SELECT u.*, e.name AS employee_name, d.name AS distributor_name
+    `SELECT u.*, e.name AS employee_name, d.name AS distributor_name,
+            e.status AS employee_status, d.status AS distributor_status
      FROM users u
      LEFT JOIN employees e ON e.id = u.employee_id
      LEFT JOIN distributors d ON d.id = u.distributor_id
-     WHERE u.mobile = ? AND u.status = 'active'`,
+     WHERE u.mobile = ?`,
     [mobile]
   );
   if (rows.length === 0) return res.status(401).json({ error: 'Invalid credentials' });
@@ -23,6 +25,11 @@ router.post('/login', async (req, res) => {
   const ok = await bcrypt.compare(password, user.password_hash);
   if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
 
+  // Only said AFTER the password is correct, so this can't be used to discover which numbers have accounts.
+  if (!accountIsActive(user)) {
+    return res.status(403).json({ error: 'This account has been deactivated. Please contact your admin.' });
+  }
+
   const payload = {
     id: user.id,
     name: user.name,
@@ -30,7 +37,7 @@ router.post('/login', async (req, res) => {
     employee_id: user.employee_id,
     distributor_id: user.distributor_id,
   };
-  const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '12h' });
+  const token = jwt.sign(payload, process.env.JWT_SECRET, { algorithm: 'HS256', expiresIn: '12h' });
   res.json({ token, user: payload });
 });
 
@@ -39,7 +46,7 @@ router.post('/login', async (req, res) => {
 // than the admin having to type in a password for every person by hand.
 function signToken(user) {
   const payload = { id: user.id, name: user.name, role: user.role, employee_id: user.employee_id, distributor_id: user.distributor_id };
-  return { token: jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '12h' }), user: payload };
+  return { token: jwt.sign(payload, process.env.JWT_SECRET, { algorithm: 'HS256', expiresIn: '12h' }), user: payload };
 }
 
 router.post('/self-register', async (req, res) => {
@@ -47,7 +54,7 @@ router.post('/self-register', async (req, res) => {
   if (!code || !mobile || !name || !password) {
     return res.status(400).json({ error: 'code, mobile, name, and password are all required' });
   }
-  if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
 
   const trimmedCode = code.trim().toUpperCase();
 

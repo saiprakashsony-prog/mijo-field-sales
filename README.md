@@ -32,9 +32,18 @@ cp .env.example .env   # fill in DB credentials and a real JWT_SECRET
 npm run initdb          # creates tables and seeds a Super Admin login
 npm start                # http://localhost:4000
 ```
-The seeded login is mobile `9999999999` / password `admin123` — log in, then use
-**Masters → Create Login** to add your real admin, sales managers, field employees
-and distributor logins, and retire the seeded one.
+A brand-new database gets one starter admin (mobile `9999999999`). Its password is **randomly
+generated and printed once in the deploy logs** (or set `INITIAL_ADMIN_PASSWORD` to choose it).
+Log in, use **Masters → Logins** to create your real admin, then deactivate the starter account.
+
+## Security notes
+- `JWT_SECRET` must be long and random (`openssl rand -hex 32`). The server prints a warning at startup if it isn't.
+- Deactivating a user — or the employee/distributor record they're linked to — blocks them immediately,
+  including anyone already logged in.
+- Login and self-registration are rate-limited per account/code; only failed attempts count.
+- Text fields can't contain `<` or `>`, all screens HTML-escape API data, and a Content-Security-Policy is sent
+  (report-only until you set `CSP_ENFORCE=true`).
+- Cross-origin API access is off unless `ALLOWED_ORIGINS` lists a site.
 
 ## 2. Deploy on Railway (same as VendorPay / production costing)
 1. Push this folder to a new GitHub repo, e.g. `saiprakashsony-prog/mijo-field-sales`.

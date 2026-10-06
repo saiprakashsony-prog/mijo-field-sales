@@ -38,6 +38,44 @@ CREATE TABLE IF NOT EXISTS mandals (
   UNIQUE KEY uniq_mandal (name, state, district)
 );
 
+CREATE TABLE IF NOT EXISTS distributors (
+  id                INT AUTO_INCREMENT PRIMARY KEY,
+  code              VARCHAR(30) UNIQUE NOT NULL,
+  name              VARCHAR(150) NOT NULL,
+  mobile            VARCHAR(20) NOT NULL,
+  email             VARCHAR(150),
+  address           TEXT,
+  territory_id      INT,
+  status            ENUM('active','inactive') DEFAULT 'active',
+  created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (territory_id) REFERENCES territories(id)
+);
+
+-- A distributor's serviceable mandals (chosen from the mandals under their territory's districts).
+CREATE TABLE IF NOT EXISTS distributor_mandals (
+  distributor_id  INT NOT NULL,
+  mandal_id       INT NOT NULL,
+  PRIMARY KEY (distributor_id, mandal_id),
+  FOREIGN KEY (distributor_id) REFERENCES distributors(id) ON DELETE CASCADE,
+  FOREIGN KEY (mandal_id) REFERENCES mandals(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS employees (
+  id                    INT AUTO_INCREMENT PRIMARY KEY,
+  code                  VARCHAR(30) UNIQUE NOT NULL,
+  name                  VARCHAR(150) NOT NULL,
+  mobile                VARCHAR(20) NOT NULL,
+  email                 VARCHAR(150),
+  date_of_joining       DATE,
+  designation           VARCHAR(100),
+  reporting_manager_id  INT NULL,
+  territory_id          INT,
+  status                ENUM('active','inactive') DEFAULT 'active',
+  created_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (reporting_manager_id) REFERENCES employees(id),
+  FOREIGN KEY (territory_id) REFERENCES territories(id)
+);
+
 -- Beats (routes): a named, repeating set of retailers a sales rep visits on specific
 -- days of the week — BRD's "beat planning". A beat's retailer list order (visit_order)
 -- is the intended visiting sequence for that route.
@@ -57,105 +95,6 @@ CREATE TABLE IF NOT EXISTS beat_days (
   day_of_week   ENUM('mon','tue','wed','thu','fri','sat','sun') NOT NULL,
   PRIMARY KEY (beat_id, day_of_week),
   FOREIGN KEY (beat_id) REFERENCES beats(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS beat_retailers (
-  beat_id       INT NOT NULL,
-  retailer_id   INT NOT NULL,
-  visit_order   INT NOT NULL DEFAULT 0,
-  PRIMARY KEY (beat_id, retailer_id),
-  FOREIGN KEY (beat_id) REFERENCES beats(id) ON DELETE CASCADE,
-  FOREIGN KEY (retailer_id) REFERENCES retailers(id) ON DELETE CASCADE
-);
-
--- Sales returns: damaged, expired, unsold, or wrong-item stock a retailer sends back.
--- A field employee reports one (status 'requested'); the distributor (or admin/management)
--- approves or rejects it. Only an APPROVED return counts as a credit against the retailer's
--- outstanding balance — see computeCreditStatus in routes/retailers.js, which now also
--- subtracts SUM(amount) of approved returns, exactly like it already does for payments.
-CREATE TABLE IF NOT EXISTS sales_returns (
-  id              INT AUTO_INCREMENT PRIMARY KEY,
-  return_no       VARCHAR(40) UNIQUE NOT NULL,
-  order_id        INT NULL,      -- optional link to the original order, for traceability
-  retailer_id     INT NOT NULL,
-  distributor_id  INT NOT NULL,
-  product_id      INT NOT NULL,
-  qty             INT NOT NULL,           -- packs being returned
-  rate            DECIMAL(10,2) NOT NULL, -- credit rate per pack (from the order if linked, else current retailer price)
-  amount          DECIMAL(12,2) NOT NULL, -- qty * rate — the credit note value once approved
-  return_type     ENUM('damage','expiry','unsold','wrong_item','other') NOT NULL,
-  reason          VARCHAR(255),
-  status          ENUM('requested','approved','rejected') DEFAULT 'requested',
-  requested_by    INT,           -- employees.id
-  reviewed_by     INT,           -- users.id (whoever approved/rejected)
-  reviewed_at     DATETIME,
-  review_note     VARCHAR(255),
-  created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (order_id) REFERENCES orders(id),
-  FOREIGN KEY (retailer_id) REFERENCES retailers(id),
-  FOREIGN KEY (distributor_id) REFERENCES distributors(id),
-  FOREIGN KEY (product_id) REFERENCES products(id)
-);
-
--- Schemes: admin-defined discounts, auto-applied at order booking time (never entered
--- manually by a field employee) and always recomputed server-side on order creation so a
--- tampered client request can't apply a discount that wasn't actually authorized.
--- NULL on product_id/territory_id/distributor_id means "applies to all" for that dimension.
--- NULL on valid_from/valid_to means "no start/end limit" on that side.
-CREATE TABLE IF NOT EXISTS schemes (
-  id              INT AUTO_INCREMENT PRIMARY KEY,
-  name            VARCHAR(150) NOT NULL,
-  discount_type   ENUM('percent','flat') NOT NULL,
-  discount_value  DECIMAL(10,2) NOT NULL,   -- percent (0-100) or a flat ₹ amount per pack
-  min_qty         INT NOT NULL DEFAULT 1,   -- minimum total pack qty on the line to qualify
-  product_id      INT NULL,
-  territory_id    INT NULL,
-  distributor_id  INT NULL,
-  valid_from      DATE NULL,
-  valid_to        DATE NULL,
-  status          ENUM('active','inactive') DEFAULT 'active',
-  created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (product_id) REFERENCES products(id),
-  FOREIGN KEY (territory_id) REFERENCES territories(id),
-  FOREIGN KEY (distributor_id) REFERENCES distributors(id)
-);
-
--- A distributor's serviceable mandals (chosen from the mandals under their territory's districts).
-CREATE TABLE IF NOT EXISTS distributor_mandals (
-  distributor_id  INT NOT NULL,
-  mandal_id       INT NOT NULL,
-  PRIMARY KEY (distributor_id, mandal_id),
-  FOREIGN KEY (distributor_id) REFERENCES distributors(id) ON DELETE CASCADE,
-  FOREIGN KEY (mandal_id) REFERENCES mandals(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS distributors (
-  id                INT AUTO_INCREMENT PRIMARY KEY,
-  code              VARCHAR(30) UNIQUE NOT NULL,
-  name              VARCHAR(150) NOT NULL,
-  mobile            VARCHAR(20) NOT NULL,
-  email             VARCHAR(150),
-  address           TEXT,
-  territory_id      INT,
-  status            ENUM('active','inactive') DEFAULT 'active',
-  created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (territory_id) REFERENCES territories(id)
-);
-
-CREATE TABLE IF NOT EXISTS employees (
-  id                    INT AUTO_INCREMENT PRIMARY KEY,
-  code                  VARCHAR(30) UNIQUE NOT NULL,
-  name                  VARCHAR(150) NOT NULL,
-  mobile                VARCHAR(20) NOT NULL,
-  email                 VARCHAR(150),
-  date_of_joining       DATE,
-  designation           VARCHAR(100),
-  reporting_manager_id  INT NULL,
-  territory_id          INT,
-  status                ENUM('active','inactive') DEFAULT 'active',
-  created_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (reporting_manager_id) REFERENCES employees(id),
-  FOREIGN KEY (territory_id) REFERENCES territories(id)
 );
 
 -- One employee can be mapped to multiple distributors (BRD 5)
@@ -212,6 +151,15 @@ CREATE TABLE IF NOT EXISTS retailers (
   INDEX idx_gps (gps_lat, gps_lng)
 );
 
+CREATE TABLE IF NOT EXISTS beat_retailers (
+  beat_id       INT NOT NULL,
+  retailer_id   INT NOT NULL,
+  visit_order   INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (beat_id, retailer_id),
+  FOREIGN KEY (beat_id) REFERENCES beats(id) ON DELETE CASCADE,
+  FOREIGN KEY (retailer_id) REFERENCES retailers(id) ON DELETE CASCADE
+);
+
 -- Payments/collections recorded against a retailer's outstanding balance. Kept simple
 -- (retailer-level running balance) rather than allocating a payment to specific orders —
 -- outstanding = SUM(billed order totals) - SUM(payments); overdue is a heuristic (see
@@ -253,6 +201,29 @@ CREATE TABLE IF NOT EXISTS products (
   created_at            DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Schemes: admin-defined discounts, auto-applied at order booking time (never entered
+-- manually by a field employee) and always recomputed server-side on order creation so a
+-- tampered client request can't apply a discount that wasn't actually authorized.
+-- NULL on product_id/territory_id/distributor_id means "applies to all" for that dimension.
+-- NULL on valid_from/valid_to means "no start/end limit" on that side.
+CREATE TABLE IF NOT EXISTS schemes (
+  id              INT AUTO_INCREMENT PRIMARY KEY,
+  name            VARCHAR(150) NOT NULL,
+  discount_type   ENUM('percent','flat') NOT NULL,
+  discount_value  DECIMAL(10,2) NOT NULL,   -- percent (0-100) or a flat ₹ amount per pack
+  min_qty         INT NOT NULL DEFAULT 1,   -- minimum total pack qty on the line to qualify
+  product_id      INT NULL,
+  territory_id    INT NULL,
+  distributor_id  INT NULL,
+  valid_from      DATE NULL,
+  valid_to        DATE NULL,
+  status          ENUM('active','inactive') DEFAULT 'active',
+  created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (product_id) REFERENCES products(id),
+  FOREIGN KEY (territory_id) REFERENCES territories(id),
+  FOREIGN KEY (distributor_id) REFERENCES distributors(id)
+);
+
 CREATE TABLE IF NOT EXISTS visits (
   id             INT AUTO_INCREMENT PRIMARY KEY,
   employee_id    INT NOT NULL,
@@ -289,6 +260,35 @@ CREATE TABLE IF NOT EXISTS orders (
   FOREIGN KEY (visit_id) REFERENCES visits(id),
   INDEX idx_order_date (order_date),
   INDEX idx_status (status)
+);
+
+-- Sales returns: damaged, expired, unsold, or wrong-item stock a retailer sends back.
+-- A field employee reports one (status 'requested'); the distributor (or admin/management)
+-- approves or rejects it. Only an APPROVED return counts as a credit against the retailer's
+-- outstanding balance — see computeCreditStatus in routes/retailers.js, which now also
+-- subtracts SUM(amount) of approved returns, exactly like it already does for payments.
+CREATE TABLE IF NOT EXISTS sales_returns (
+  id              INT AUTO_INCREMENT PRIMARY KEY,
+  return_no       VARCHAR(40) UNIQUE NOT NULL,
+  order_id        INT NULL,      -- optional link to the original order, for traceability
+  retailer_id     INT NOT NULL,
+  distributor_id  INT NOT NULL,
+  product_id      INT NOT NULL,
+  qty             INT NOT NULL,           -- packs being returned
+  rate            DECIMAL(10,2) NOT NULL, -- credit rate per pack (from the order if linked, else current retailer price)
+  amount          DECIMAL(12,2) NOT NULL, -- qty * rate — the credit note value once approved
+  return_type     ENUM('damage','expiry','unsold','wrong_item','other') NOT NULL,
+  reason          VARCHAR(255),
+  status          ENUM('requested','approved','rejected') DEFAULT 'requested',
+  requested_by    INT,           -- employees.id
+  reviewed_by     INT,           -- users.id (whoever approved/rejected)
+  reviewed_at     DATETIME,
+  review_note     VARCHAR(255),
+  created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (order_id) REFERENCES orders(id),
+  FOREIGN KEY (retailer_id) REFERENCES retailers(id),
+  FOREIGN KEY (distributor_id) REFERENCES distributors(id),
+  FOREIGN KEY (product_id) REFERENCES products(id)
 );
 
 CREATE TABLE IF NOT EXISTS order_lines (
