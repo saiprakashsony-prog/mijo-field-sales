@@ -61,6 +61,11 @@ async function migrate(conn) {
   await addColumnIfMissing('retailers', 'credit_limit', 'credit_limit DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER status');
   await addColumnIfMissing('retailers', 'payment_terms_days', 'payment_terms_days INT NOT NULL DEFAULT 0 AFTER credit_limit');
 
+  // Dispatch route planning: distributor warehouse location
+  await addColumnIfMissing('distributors', 'gps_lat', 'gps_lat DECIMAL(10,7) NULL AFTER territory_id');
+  await addColumnIfMissing('distributors', 'gps_lng', 'gps_lng DECIMAL(10,7) NULL AFTER gps_lat');
+  await addColumnIfMissing('distributors', 'location_label', 'location_label VARCHAR(150) NULL AFTER gps_lng');
+
   // Delivery executive role — safe to re-run every time (just resets the same ENUM definition)
   await conn.query(
     `ALTER TABLE users MODIFY COLUMN role ENUM('super_admin','management','sales_manager','field_employee','distributor','delivery_executive') NOT NULL`

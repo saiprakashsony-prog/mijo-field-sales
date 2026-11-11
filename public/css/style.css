@@ -129,3 +129,26 @@ th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: upp
 .chart-box { position: relative; margin-bottom: 14px; }
 .chart-box canvas { max-width: 100%; }
 .total-row { text-align: right; font-size: 16px; font-weight: 700; margin-top: 10px; }
+
+/* ---------- Dispatch Planner / Delivery Route ---------- */
+.dsp-map { height: 460px; }
+@media (max-width: 720px) { .dsp-map { height: 340px; } }
+.dsp-pin { width: 26px; height: 26px; border-radius: 50%; color: #fff; font-weight: 700; font-size: 12px; display: flex; align-items: center; justify-content: center; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35); }
+.dsp-pin-depot { width: 28px; height: 28px; border-radius: 6px; background: #111827; }
+.dsp-num { display: inline-flex; width: 22px; height: 22px; border-radius: 50%; color: #fff; font-size: 11px; font-weight: 700; align-items: center; justify-content: center; }
+.dsp-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+.dsp-vtabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.dsp-vtabs button { border: 1px solid var(--border); background: #fff; border-radius: 6px; padding: 7px 12px; cursor: pointer; font-size: 13px; }
+.dsp-vtabs button.active { background: var(--ink); color: #fff; border-color: var(--ink); }
+.dsp-depot td { background: #f9fafb; color: var(--muted); }
+.dsp-nav { display: inline-block; margin: 3px 6px 3px 0; padding: 7px 12px; border-radius: 6px; background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; text-decoration: none; font-weight: 600; font-size: 13px; }
+.dsp-warn { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; border-radius: 6px; padding: 8px 10px; font-size: 13px; margin: 8px 0; }
+.dsp-truck { display: flex; align-items: stretch; margin: 10px 0 6px; min-height: 60px; }
+.dsp-cab { width: 52px; background: #374151; color: #fff; border-radius: 12px 4px 4px 12px; display: flex; align-items: center; justify-content: center; font-size: 11px; margin-right: 4px; }
+.dsp-bay { flex: 1; display: flex; gap: 3px; padding: 3px; border: 2px solid #374151; border-radius: 4px; background: #f9fafb; min-width: 0; }
+.dsp-box { border-radius: 4px; color: #fff; font-size: 11px; padding: 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; min-width: 40px; overflow: hidden; line-height: 1.2; }
+.dsp-door { width: 28px; display: flex; align-items: center; justify-content: center; writing-mode: vertical-rl; font-size: 11px; color: var(--muted); border: 2px dashed #9ca3af; border-left: none; border-radius: 0 4px 4px 0; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(17,24,39,.5); display: flex; align-items: center; justify-content: center; z-index: 5000; padding: 12px; }
+.modal-card { width: 100%; max-width: 620px; max-height: 94vh; overflow-y: auto; margin: 0; }
+.dsp-toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #111827; color: #fff; padding: 8px 14px; border-radius: 6px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 6000; }
+.dsp-toast.show { opacity: 1; }

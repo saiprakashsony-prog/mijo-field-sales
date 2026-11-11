@@ -46,6 +46,9 @@ CREATE TABLE IF NOT EXISTS distributors (
   email             VARCHAR(150),
   address           TEXT,
   territory_id      INT,
+  gps_lat           DECIMAL(10,7) NULL,   -- warehouse/godown location, used for dispatch route planning
+  gps_lng           DECIMAL(10,7) NULL,
+  location_label    VARCHAR(150) NULL,
   status            ENUM('active','inactive') DEFAULT 'active',
   created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (territory_id) REFERENCES territories(id)
@@ -328,6 +331,53 @@ CREATE TABLE IF NOT EXISTS audit_log (
   before_json  JSON NULL,
   after_json   JSON NULL,
   created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Dispatch planning: a saved plan for shipping stock from the factory (origin) to distributors,
+-- split across one or more vehicles. Each vehicle's stops are stored in delivery order; the
+-- truck is loaded in the reverse of that order (last drop goes in first).
+CREATE TABLE IF NOT EXISTS dispatch_plans (
+  id               INT AUTO_INCREMENT PRIMARY KEY,
+  plan_no          VARCHAR(40) UNIQUE NOT NULL,
+  plan_date        DATE NOT NULL,
+  origin_label     VARCHAR(150) NOT NULL,
+  origin_lat       DECIMAL(10,7) NOT NULL,
+  origin_lng       DECIMAL(10,7) NOT NULL,
+  depart_time      TIME NOT NULL,
+  return_to_origin TINYINT(1) NOT NULL DEFAULT 1,
+  avg_speed_kmph   INT NOT NULL DEFAULT 40,
+  unload_minutes   INT NOT NULL DEFAULT 30,
+  total_km         DECIMAL(10,1) NOT NULL DEFAULT 0,
+  status           ENUM('planned','dispatched','completed','cancelled') DEFAULT 'planned',
+  notes            VARCHAR(255),
+  created_by       INT,          -- users.id
+  created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_plan_date (plan_date)
+);
+
+CREATE TABLE IF NOT EXISTS dispatch_plan_vehicles (
+  id             INT AUTO_INCREMENT PRIMARY KEY,
+  plan_id        INT NOT NULL,
+  vehicle_no     INT NOT NULL,            -- 1, 2, 3 ... within the plan
+  vehicle_reg    VARCHAR(30),
+  driver_name    VARCHAR(100),
+  driver_mobile  VARCHAR(20),
+  total_km       DECIMAL(10,1) NOT NULL DEFAULT 0,
+  FOREIGN KEY (plan_id) REFERENCES dispatch_plans(id) ON DELETE CASCADE,
+  UNIQUE KEY uniq_plan_vehicle (plan_id, vehicle_no)
+);
+
+CREATE TABLE IF NOT EXISTS dispatch_plan_stops (
+  id              INT AUTO_INCREMENT PRIMARY KEY,
+  plan_id         INT NOT NULL,
+  vehicle_no      INT NOT NULL,
+  stop_seq        INT NOT NULL,            -- delivery order within the vehicle (1 = first drop)
+  distributor_id  INT NOT NULL,
+  cases           DECIMAL(10,2) NOT NULL DEFAULT 0,
+  leg_km          DECIMAL(10,1) NOT NULL DEFAULT 0,
+  eta_minutes     INT NOT NULL DEFAULT 0,  -- minutes after midnight of plan_date (may exceed 1440 for next-day arrivals)
+  FOREIGN KEY (plan_id) REFERENCES dispatch_plans(id) ON DELETE CASCADE,
+  FOREIGN KEY (distributor_id) REFERENCES distributors(id)
 );
 
 -- Seed a super admin login: mobile 9999999999 / password "admin123" (bcrypt hash below)
