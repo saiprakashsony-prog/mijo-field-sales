@@ -1127,6 +1127,7 @@ async function renderMasters() {
           </div>
         </div>
         <button class="btn small" id="addDistributor">Add Distributor</button>
+        <div id="distributorFormBox"></div>
         <div id="distributorList" style="margin-top:10px"></div>
       </div>
       </div>
@@ -1316,7 +1317,24 @@ async function renderMasters() {
   async function loadDistributors() {
     const rows = await api('/distributors');
     const box = wrap.querySelector('#distributorList');
-    box.innerHTML = `<table><thead><tr><th>Code</th><th>Name</th><th>Mobile</th><th>Territory</th><th>Mandals</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}"><td>${esc(r.code)}</td><td>${esc(r.name)}</td><td>${esc(r.mobile)}</td><td>${esc(r.territory_name || '')}</td><td>${esc(r.mandals || '')}</td><td><button class="btn small secondary delDistributorBtn">Delete</button></td></tr>`).join('')}</tbody></table>`;
+    box.innerHTML = `<table><thead><tr><th>Code</th><th>Name</th><th>Mobile</th><th>Territory</th><th>Mandals</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}"><td>${esc(r.code)}</td><td><b>${esc(r.name)}</b>${r.address ? `<br/><span class="muted" style="font-size:11px">${esc(r.address)}</span>` : ''}</td><td>${esc(r.mobile)}</td><td>${esc(r.territory_name || '')}</td><td style="white-space:normal;max-width:260px">${esc(r.mandals || '')}</td>
+      <td><span class="badge ${r.status === 'active' ? 'delivered' : 'cancelled'}">${esc(r.status)}</span></td>
+      <td style="white-space:nowrap"><button class="btn small secondary editDistributorBtn">Edit</button>
+        <button class="btn small secondary toggleDistributorBtn" data-next="${r.status === 'active' ? 'inactive' : 'active'}">${r.status === 'active' ? 'Deactivate' : 'Reactivate'}</button>
+        <button class="btn small secondary delDistributorBtn">Delete</button></td></tr>`).join('')}</tbody></table>`;
+    box.querySelectorAll('.editDistributorBtn').forEach((btn) => {
+      btn.onclick = () => openDistributorForm(rows.find((r) => String(r.id) === btn.closest('tr').dataset.id));
+    });
+    box.querySelectorAll('.toggleDistributorBtn').forEach((btn) => {
+      btn.onclick = async () => {
+        const next = btn.dataset.next;
+        if (next === 'inactive' && !confirm('Deactivate this distributor? Its login stops working and it will no longer appear for new orders.')) return;
+        try {
+          await api(`/distributors/${btn.closest('tr').dataset.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: next }) });
+          loadDistributors();
+        } catch (e) { alert(e.message); }
+      };
+    });
     box.querySelectorAll('.delDistributorBtn').forEach((btn) => {
       btn.onclick = async () => {
         if (!confirm('Delete this distributor?')) return;
@@ -1328,6 +1346,69 @@ async function renderMasters() {
     });
     return rows;
   }
+  // Edit form for an existing distributor: details, territory, mandals (all districts of the territory) and status.
+  async function openDistributorForm(d) {
+    if (!d) return;
+    const box = wrap.querySelector('#distributorFormBox');
+    if (!territoriesCache.length) await loadTerritories();
+    const selected = new Set((d.mandal_ids || []).map(Number));
+    box.innerHTML = `<div class="card" style="border-color:var(--brand);margin-top:10px">
+      <p class="section-title">Edit Distributor — ${esc(d.code)}</p>
+      <div class="grid cols-3">
+        <div class="field"><label>Name *</label><input id="edName" value="${esc(d.name)}" /></div>
+        <div class="field"><label>Mobile *</label><input id="edMobile" value="${esc(d.mobile)}" /></div>
+        <div class="field"><label>Email</label><input id="edEmail" value="${esc(d.email || '')}" /></div>
+      </div>
+      <div class="field"><label>Address</label><input id="edAddress" value="${esc(d.address || '')}" /></div>
+      <div class="grid cols-3">
+        <div class="field"><label>Territory</label><select id="edTerritory"><option value="">-- none --</option>${territoriesCache.map((t) => `<option value="${esc(t.id)}" ${t.id === d.territory_id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></div>
+        <div class="field"><label>Status</label><select id="edStatus"><option value="active" ${d.status === 'active' ? 'selected' : ''}>Active</option><option value="inactive" ${d.status === 'inactive' ? 'selected' : ''}>Inactive</option></select></div>
+      </div>
+      <div class="field"><label>Mandals served</label>
+        <input id="edMandalFilter" placeholder="Search mandal..." style="margin-bottom:6px" />
+        <div id="edMandals" class="map-search-results" style="display:block;max-height:220px"></div></div>
+      <p class="muted" style="font-size:12px">The godown location is set from the Dispatch Planner. Changing the territory also changes which ASM covers this distributor.</p>
+      <div class="error-msg" id="edErr"></div>
+      <button class="btn small" id="edSave">Save changes</button> <button class="btn small secondary" id="edCancel">Cancel</button>
+    </div>`;
+    const $ = (q) => box.querySelector(q);
+    let mandals = [];
+    async function loadMandals() {
+      const t = territoriesCache.find((x) => String(x.id) === $('#edTerritory').value);
+      const districts = t ? t.districts.map((x) => x.district) : [];
+      mandals = districts.length ? await api(`/mandals?districts=${encodeURIComponent(districts.join(','))}`) : [];
+      renderMandals();
+    }
+    function renderMandals() {
+      const q = $('#edMandalFilter').value.trim().toLowerCase();
+      const list = mandals.filter((m) => !q || m.name.toLowerCase().includes(q) || selected.has(m.id));
+      $('#edMandals').innerHTML = list.length
+        ? list.map((m) => `<label style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer"><input type="checkbox" value="${esc(m.id)}" style="width:auto" ${selected.has(m.id) ? 'checked' : ''}/> ${esc(m.name)} <span class="muted" style="font-size:11px">${esc(m.district)}</span></label>`).join('')
+        : `<div class="muted" style="padding:8px 10px">${$('#edTerritory').value ? 'No mandals added for this territory\'s districts yet.' : 'Select a territory to map mandals.'}</div>`;
+    }
+    $('#edMandals').addEventListener('change', (e) => { const id = Number(e.target.value); if (e.target.checked) selected.add(id); else selected.delete(id); });
+    $('#edMandalFilter').oninput = renderMandals;
+    $('#edTerritory').onchange = () => { selected.clear(); loadMandals(); };
+    $('#edCancel').onclick = () => { box.innerHTML = ''; };
+    $('#edSave').onclick = async () => {
+      $('#edErr').textContent = '';
+      // keep only mandals that belong to the chosen territory
+      const valid = new Set(mandals.map((m) => m.id));
+      try {
+        await api(`/distributors/${d.id}`, { method: 'PUT', body: JSON.stringify({
+          name: $('#edName').value, mobile: $('#edMobile').value, email: $('#edEmail').value, address: $('#edAddress').value,
+          territory_id: $('#edTerritory').value || null, status: $('#edStatus').value,
+          mandal_ids: [...selected].filter((id) => valid.has(id)),
+        }) });
+        box.innerHTML = '';
+        loadDistributors();
+      } catch (e) { $('#edErr').textContent = e.message; }
+    };
+    await loadMandals();
+    box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    $('#edName').focus();
+  }
+
   let beatRetailerOrder = []; // tracks check order, not DOM order, so "order you check them" is honored
   async function loadBeatFormOptions() {
     wrap.querySelector('#btTerritory').innerHTML = '<option value="">-- any --</option>' + territoriesCache.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');
