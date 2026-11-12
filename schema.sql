@@ -388,6 +388,69 @@ CREATE TABLE IF NOT EXISTS distributor_order_lines (
   FOREIGN KEY (product_id) REFERENCES products(id)
 );
 
+-- ---------------------------------------------------------------------------
+-- Production link with the MMS (mms.mijofoods.co.in)
+-- Products and batches are pulled from the MMS; each MMS product is linked to a
+-- DMS SKU once. Finished-goods stock = produced − dispatched ± adjustments.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS mms_products (
+  mms_product_id  VARCHAR(64) PRIMARY KEY,
+  name            VARCHAR(150) NOT NULL,
+  output_unit     VARCHAR(50),
+  pack_size       DECIMAL(14,4) NULL,       -- MMS: quantity of output unit per pack (e.g. 0.05 kg)
+  product_id      INT NULL,                 -- linked DMS SKU
+  packs_per_unit  DECIMAL(14,4) NULL,       -- manual override: packs per 1 MMS output unit
+  active          TINYINT(1) NOT NULL DEFAULT 1,
+  synced_at       DATETIME NULL,
+  FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS production_batches (
+  mms_batch_id    VARCHAR(64) PRIMARY KEY,
+  mms_product_id  VARCHAR(64) NOT NULL,
+  batch_date      DATE NOT NULL,
+  actual_qty      DECIMAL(14,3) NOT NULL,
+  unit            VARCHAR(50),
+  packs_reported  DECIMAL(14,2) NULL,       -- packs as computed by MMS from its pack size
+  rm_cost         DECIMAL(14,2) NOT NULL DEFAULT 0,
+  extra_cost      DECIMAL(14,2) NOT NULL DEFAULT 0,
+  total_cost      DECIMAL(14,2) NOT NULL DEFAULT 0,
+  mms_updated_at  VARCHAR(40) NULL,
+  synced_at       DATETIME NULL,
+  INDEX idx_pb_date (batch_date),
+  INDEX idx_pb_product (mms_product_id)
+);
+
+CREATE TABLE IF NOT EXISTS stock_adjustments (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  product_id  INT NOT NULL,
+  adj_date    DATE NOT NULL,
+  packs       INT NOT NULL,                 -- + adds stock, − removes it
+  reason      VARCHAR(40) NOT NULL,         -- opening_stock / damage / samples / correction / other
+  notes       VARCHAR(255),
+  created_by  INT,
+  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (product_id) REFERENCES products(id)
+);
+
+CREATE TABLE IF NOT EXISTS integration_state (
+  k           VARCHAR(60) PRIMARY KEY,
+  v           TEXT,
+  updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- Monthly operating expenses for the net P&L (one amount per category per month)
+CREATE TABLE IF NOT EXISTS monthly_expenses (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  month       CHAR(7) NOT NULL,             -- YYYY-MM
+  category    VARCHAR(60) NOT NULL,
+  amount      DECIMAL(14,2) NOT NULL DEFAULT 0,
+  notes       VARCHAR(255),
+  updated_by  INT,
+  updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_month_category (month, category)
+);
+
 -- Dispatch planning: a saved plan for shipping stock from the factory (origin) to distributors,
 -- split across one or more vehicles. Each vehicle's stops are stored in delivery order; the
 -- truck is loaded in the reverse of that order (last drop goes in first).

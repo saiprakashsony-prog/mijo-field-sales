@@ -210,9 +210,9 @@ const TABS_BY_ROLE = {
   field_employee: [['myroute', 'My Route'], ['newretailer', 'New Retailer'], ['booking', 'Book Order'], ['myorders', 'My Orders'], ['returns', 'Returns']],
   distributor: [['orderbook', 'Order Book'], ['consolidated', 'Consolidated Picking List'], ['deliveryroute', 'Delivery Route'], ['dorders', 'Stock Orders'], ['returns', 'Returns']],
   delivery_executive: [['deliveries', 'My Deliveries'], ['deliveryroute', 'Delivery Route']],
-  sales_manager: [['dashboard', 'Dashboard'], ['orders', 'All Orders'], ['dorders', 'Distributor Orders'], ['dispatch', 'Dispatch Planner'], ['returns', 'Returns'], ['masters', 'Masters']],
-  management: [['dashboard', 'Dashboard'], ['orders', 'All Orders'], ['dorders', 'Distributor Orders'], ['dispatch', 'Dispatch Planner'], ['returns', 'Returns'], ['masters', 'Masters']],
-  super_admin: [['dashboard', 'Dashboard'], ['orders', 'All Orders'], ['dorders', 'Distributor Orders'], ['dispatch', 'Dispatch Planner'], ['returns', 'Returns'], ['masters', 'Masters']],
+  sales_manager: [['dashboard', 'Dashboard'], ['orders', 'All Orders'], ['dorders', 'Distributor Orders'], ['dispatch', 'Dispatch Planner'], ['prodstock', 'Production & Stock'], ['returns', 'Returns'], ['masters', 'Masters']],
+  management: [['dashboard', 'Dashboard'], ['orders', 'All Orders'], ['dorders', 'Distributor Orders'], ['dispatch', 'Dispatch Planner'], ['prodstock', 'Production & Stock'], ['expenses', 'Expenses'], ['pnl', 'P&L'], ['returns', 'Returns'], ['masters', 'Masters']],
+  super_admin: [['dashboard', 'Dashboard'], ['orders', 'All Orders'], ['dorders', 'Distributor Orders'], ['dispatch', 'Dispatch Planner'], ['prodstock', 'Production & Stock'], ['expenses', 'Expenses'], ['pnl', 'P&L'], ['returns', 'Returns'], ['masters', 'Masters']],
 };
 
 function renderShell() {
@@ -252,6 +252,9 @@ function renderShell() {
     areaorders: renderAreaOrders,
     team: renderTeam,
     dorders: renderDistributorOrders,
+    prodstock: renderProductionStock,
+    expenses: renderExpenses,
+    pnl: renderPnl,
   };
   (renderers[state.tab] || (() => el('<div/>')))().then((node) => main.appendChild(node)).catch((e) => {
     main.appendChild(el(`<div class="card error-msg">${esc(e.message)}</div>`));
@@ -275,6 +278,9 @@ function refreshMain() {
     areaorders: renderAreaOrders,
     team: renderTeam,
     dorders: renderDistributorOrders,
+    prodstock: renderProductionStock,
+    expenses: renderExpenses,
+    pnl: renderPnl,
   };
   renderers[state.tab]().then((node) => main.appendChild(node));
 }
