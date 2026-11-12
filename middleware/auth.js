@@ -18,7 +18,7 @@ async function loadAccount(userId) {
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.row;
   const [rows] = await pool.query(
     `SELECT u.id, u.name, u.role, u.status, u.employee_id, u.distributor_id,
-            e.status AS employee_status, d.status AS distributor_status
+            e.status AS employee_status, e.level AS employee_level, d.status AS distributor_status
      FROM users u
      LEFT JOIN employees e ON e.id = u.employee_id
      LEFT JOIN distributors d ON d.id = u.distributor_id
@@ -65,6 +65,7 @@ async function authRequired(req, res, next) {
   req.user = {
     id: account.id, name: account.name, role: account.role,
     employee_id: account.employee_id, distributor_id: account.distributor_id,
+    level: account.role === 'field_employee' ? (account.employee_level || 'SR') : null,
   };
   next();
 }

@@ -192,6 +192,20 @@ function renderLogin() {
 }
 
 // ---------- Shell / nav ----------
+const MANAGER_LEVELS = ['RM', 'ASM', 'SO'];
+const LEVEL_LABELS = { RM: 'Regional Manager', ASM: 'Area Sales Manager', SO: 'Sales Officer', SR: 'Sales Representative' };
+const isAreaManager = () => state.user && state.user.role === 'field_employee' && MANAGER_LEVELS.includes(state.user.level);
+
+// RM / ASM / SO get the field app plus area views for their part of the hierarchy
+function tabsForUser() {
+  const tabs = (TABS_BY_ROLE[state.user.role] || []).slice();
+  if (isAreaManager()) {
+    const at = tabs.findIndex((t) => t[0] === 'myorders') + 1;
+    tabs.splice(at, 0, ['areadash', 'Area Dashboard'], ['areaorders', 'Area Orders'], ['team', 'My Team']);
+  }
+  return tabs;
+}
+
 const TABS_BY_ROLE = {
   field_employee: [['myroute', 'My Route'], ['newretailer', 'New Retailer'], ['booking', 'Book Order'], ['myorders', 'My Orders'], ['returns', 'Returns']],
   distributor: [['orderbook', 'Order Book'], ['consolidated', 'Consolidated Picking List'], ['deliveryroute', 'Delivery Route'], ['returns', 'Returns']],
@@ -202,13 +216,13 @@ const TABS_BY_ROLE = {
 };
 
 function renderShell() {
-  const tabs = TABS_BY_ROLE[state.user.role] || [];
-  if (!state.tab) state.tab = tabs[0][0];
+  const tabs = tabsForUser();
+  if (!state.tab || !tabs.some((t) => t[0] === state.tab)) state.tab = tabs[0][0];
   const shell = el(`
     <div>
       <header class="topbar">
         <h1>MIJO Foods · Field Sales</h1>
-        <div class="who">${esc(state.user.name)} (${state.user.role.replace('_', ' ')}) &nbsp;
+        <div class="who">${esc(state.user.name)} (${state.user.role === 'field_employee' && state.user.level ? esc(LEVEL_LABELS[state.user.level]) : state.user.role.replace('_', ' ')}) &nbsp;
           <button class="btn small secondary" id="logoutBtn">Log out</button>
         </div>
       </header>
@@ -234,6 +248,9 @@ function renderShell() {
     deliveries: renderDeliveries,
     dispatch: renderDispatchPlanner,
     deliveryroute: renderDeliveryRoute,
+    areadash: renderAreaDashboard,
+    areaorders: renderAreaOrders,
+    team: renderTeam,
   };
   (renderers[state.tab] || (() => el('<div/>')))().then((node) => main.appendChild(node)).catch((e) => {
     main.appendChild(el(`<div class="card error-msg">${esc(e.message)}</div>`));
@@ -253,6 +270,9 @@ function refreshMain() {
     deliveries: renderDeliveries,
     dispatch: renderDispatchPlanner,
     deliveryroute: renderDeliveryRoute,
+    areadash: renderAreaDashboard,
+    areaorders: renderAreaOrders,
+    team: renderTeam,
   };
   renderers[state.tab]().then((node) => main.appendChild(node));
 }
@@ -693,7 +713,7 @@ async function renderReturns() {
   }
 
   async function loadReturnsList() {
-    const rows = await api('/returns');
+    const rows = await api(isAreaManager() ? '/returns?scope=area' : '/returns');
     const box = wrap.querySelector('#returnsList');
     box.innerHTML = rows.length
       ? `<table><thead><tr><th>Return No</th><th>Date</th><th>Retailer</th><th>Product</th><th>Qty</th><th>Amount</th><th>Type</th><th>Status</th>${canReview ? '<th></th>' : ''}</tr></thead>
@@ -988,6 +1008,35 @@ async function renderAllOrders() {
   return el(`<div class="card"><p class="section-title">All Orders</p>${ordersTable(orders, { showEmployee: true, showDistributor: true })}</div>`);
 }
 
+// ---------- RM / ASM / SO: area views ----------
+async function renderAreaDashboard() {
+  const node = await renderDashboard();
+  node.prepend(el(`<div class="card" style="padding:10px 14px"><b>${esc(LEVEL_LABELS[state.user.level])}</b> · showing orders, retailers and visits for the distributors in your area, and your team.</div>`));
+  return node;
+}
+
+async function renderAreaOrders() {
+  const orders = await api('/orders?scope=area');
+  return el(`<div class="card"><p class="section-title">Area Orders</p>
+    <p class="muted" style="margin-top:-4px">All orders for the distributors in your area, booked by anyone in your team.</p>
+    ${ordersTable(orders, { showEmployee: true, showDistributor: true })}</div>`);
+}
+
+async function renderTeam() {
+  const rows = await api('/employees');
+  const me = rows.find((r) => r.id === state.user.employee_id);
+  const others = rows.filter((r) => r.id !== state.user.employee_id);
+  return el(`<div class="card">
+    <p class="section-title">My Team</p>
+    ${me ? `<p class="muted" style="margin-top:-4px">Your area: <b>${esc(me.area || '—')}</b></p>` : ''}
+    ${others.length ? `<table><thead><tr><th>Name</th><th>Designation</th><th>Reports to</th><th>Area</th><th>Mobile</th><th>Status</th></tr></thead><tbody>
+      ${others.map((r) => `<tr><td><b>${esc(r.name)}</b><br/><span class="muted" style="font-size:11px">${esc(r.code)}</span></td><td>${esc(r.level_label)}</td><td>${esc(r.reporting_manager_name || '—')}</td>
+        <td style="white-space:normal">${esc(r.area || '—')}</td><td><a href="tel:${esc(r.mobile)}">${esc(r.mobile)}</a></td>
+        <td><span class="badge ${r.status === 'active' ? 'delivered' : 'cancelled'}">${esc(r.status)}</span></td></tr>`).join('')}
+    </tbody></table>` : '<p class="muted">No one reports to you yet. Ask your admin to set "Reports to" on your team members in Masters → Field Employees.</p>'}
+  </div>`);
+}
+
 // ---------- Management: Masters ----------
 const MASTERS_SECTIONS = [
   ['territories', 'Territories'],
@@ -1076,14 +1125,9 @@ async function renderMasters() {
       <div class="master-section" data-section="employees">
       <div class="card">
         <p class="section-title">Field Employees</p>
-        <div class="grid cols-3">
-          <div class="field"><label>Name</label><input id="meName" /></div>
-          <div class="field"><label>Mobile</label><input id="meMobile" /></div>
-          <div class="field"><label>Designation</label><input id="meDesignation" /></div>
-          <div class="field"><label>Assigned Distributor</label><select id="meDistributor"></select></div>
-        </div>
-        <button class="btn small" id="addEmployee">Add Employee</button>
-        <div id="editEmployeeBox"></div>
+        <p class="muted" style="margin-top:-4px">Hierarchy: Regional Manager (states) → Area Sales Manager (territories) → Sales Officer (distributors) → Sales Representative (distributors). Each person sees the data for their area.</p>
+        <button class="btn small" id="newEmployeeBtn">+ Add Employee</button>
+        <div id="employeeFormBox"></div>
         <div id="employeeList" style="margin-top:10px"></div>
       </div>
       </div>
@@ -1274,7 +1318,6 @@ async function renderMasters() {
         } catch (e) { alert(e.message); }
       };
     });
-    wrap.querySelector('#meDistributor').innerHTML = rows.map((r) => `<option value="${esc(r.id)}">${esc(r.name)}</option>`).join('');
     return rows;
   }
   let beatRetailerOrder = []; // tracks check order, not DOM order, so "order you check them" is honored
@@ -1341,14 +1384,17 @@ async function renderMasters() {
     } catch (e) { errBox.textContent = e.message; }
   };
 
+  let employeesCache = [];
   async function loadEmployees() {
     const rows = await api('/employees');
+    employeesCache = rows;
     const box = wrap.querySelector('#employeeList');
-    box.innerHTML = `<table><thead><tr><th>Code</th><th>Name</th><th>Mobile</th><th>Distributors</th><th>Status</th><th></th></tr></thead>
+    box.innerHTML = `<table><thead><tr><th>Code</th><th>Name</th><th>Designation</th><th>Reports to</th><th>Area</th><th>Mobile</th><th>Status</th><th></th></tr></thead>
       <tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}">
-        <td>${esc(r.code)}</td><td>${esc(r.name)}</td><td>${esc(r.mobile)}</td><td>${esc(r.distributors || '')}</td>
+        <td>${esc(r.code)}</td><td><b>${esc(r.name)}</b></td><td>${esc(r.level_label)}</td><td>${esc(r.reporting_manager_name || '—')}</td>
+        <td style="white-space:normal;max-width:260px">${esc(r.area || '—')}</td><td>${esc(r.mobile)}</td>
         <td><span class="badge ${r.status === 'active' ? 'delivered' : 'cancelled'}">${esc(r.status)}</span></td>
-        <td>
+        <td style="white-space:nowrap">
           <button class="btn small secondary editEmployeeBtn">Edit</button>
           ${r.status === 'active' ? '<button class="btn small secondary toggleEmpBtn" data-next="inactive">Deactivate</button>' : '<button class="btn small secondary toggleEmpBtn" data-next="active">Reactivate</button>'}
         </td>
@@ -1362,45 +1408,93 @@ async function renderMasters() {
       };
     });
     box.querySelectorAll('.editEmployeeBtn').forEach((btn) => {
-      btn.onclick = () => {
-        const id = btn.closest('tr').dataset.id;
-        openEmployeeEditor(rows.find((r) => String(r.id) === id));
-      };
+      btn.onclick = () => openEmployeeForm(rows.find((r) => String(r.id) === btn.closest('tr').dataset.id));
     });
     return rows;
   }
 
-  function openEmployeeEditor(emp) {
-    const editBox = wrap.querySelector('#editEmployeeBox');
-    editBox.innerHTML = `
-      <div class="card" style="border-color:var(--brand)">
-        <p class="section-title">Edit Employee — ${esc(emp.code)}</p>
+  // One form for add and edit. The designation decides who they report to and what their area is.
+  async function openEmployeeForm(emp) {
+    const box = wrap.querySelector('#employeeFormBox');
+    const [territories, distributors] = await Promise.all([api('/territories'), api('/distributors')]);
+    const REPORTS_TO = { RM: null, ASM: 'RM', SO: 'ASM', SR: 'SO' };
+    const e = emp || { level: 'SR', states: [], territory_ids: [], distributor_ids: [] };
+    box.innerHTML = `
+      <div class="card" style="border-color:var(--brand);margin-top:10px">
+        <p class="section-title">${emp ? `Edit Employee — ${esc(emp.code)}` : 'New Employee'}</p>
         <div class="grid cols-3">
-          <div class="field"><label>Name</label><input id="eeName" value="${esc(emp.name)}" /></div>
-          <div class="field"><label>Mobile</label><input id="eeMobile" value="${esc(emp.mobile)}" /></div>
-          <div class="field"><label>Designation</label><input id="eeDesignation" value="${esc(emp.designation || '')}" /></div>
-          <div class="field"><label>Assigned Distributor</label><select id="eeDistributor">${wrap.querySelector('#meDistributor').innerHTML}</select></div>
-          <div class="field"><label>Status</label>
-            <select id="eeStatus"><option value="active" ${emp.status === 'active' ? 'selected' : ''}>Active</option><option value="inactive" ${emp.status === 'inactive' ? 'selected' : ''}>Inactive</option></select>
-          </div>
+          <div class="field"><label>Name *</label><input id="efName" value="${esc(e.name || '')}" /></div>
+          <div class="field"><label>Mobile *</label><input id="efMobile" value="${esc(e.mobile || '')}" /></div>
+          <div class="field"><label>Designation *</label><select id="efLevel">
+            ${['RM', 'ASM', 'SO', 'SR'].map((l) => `<option value="${l}" ${l === e.level ? 'selected' : ''}>${LEVEL_LABELS[l]}</option>`).join('')}
+          </select></div>
+          <div class="field" id="efMgrWrap"><label id="efMgrLabel">Reports to</label><select id="efMgr"></select></div>
+          ${emp ? `<div class="field"><label>Status</label><select id="efStatus"><option value="active" ${e.status === 'active' ? 'selected' : ''}>Active</option><option value="inactive" ${e.status === 'inactive' ? 'selected' : ''}>Inactive</option></select></div>` : ''}
         </div>
-        <button class="btn small" id="eeSave">Save</button>
-        <button class="btn small secondary" id="eeCancel">Cancel</button>
+        <div class="field"><label id="efAreaLabel"></label>
+          <input id="efAreaFilter" placeholder="Search..." style="margin-bottom:6px" />
+          <div id="efArea" class="map-search-results" style="display:block;max-height:220px"></div>
+        </div>
+        <div class="error-msg" id="efErr"></div>
+        <button class="btn small" id="efSave">${emp ? 'Save changes' : 'Add Employee'}</button>
+        <button class="btn small secondary" id="efCancel">Cancel</button>
       </div>`;
-    editBox.querySelector('#eeCancel').onclick = () => { editBox.innerHTML = ''; };
-    editBox.querySelector('#eeSave').onclick = async () => {
+    const $ = (q) => box.querySelector(q);
+    const selected = { RM: new Set(e.states || []), ASM: new Set((e.territory_ids || []).map(String)), SO: new Set((e.distributor_ids || []).map(String)) };
+    selected.SR = selected.SO;
+
+    function areaItems(level) {
+      if (level === 'RM') return window.INDIA_STATE_LIST.map((st) => ({ v: st, t: st }));
+      if (level === 'ASM') return territories.map((t) => ({ v: String(t.id), t: `${t.name}${t.districts && t.districts.length ? ' — ' + t.districts.map((d) => d.district).join(', ') : ''}` }));
+      return distributors.filter((d) => d.status !== 'inactive').map((d) => ({ v: String(d.id), t: `${d.name} (${d.code})${d.territory_name ? ' — ' + d.territory_name : ''}` }));
+    }
+    function renderArea() {
+      const level = $('#efLevel').value;
+      $('#efAreaLabel').textContent = level === 'RM' ? 'States covered *' : level === 'ASM' ? 'Territories covered *' : 'Distributors handled *';
+      const q = $('#efAreaFilter').value.trim().toLowerCase();
+      const items = areaItems(level).filter((i) => !q || i.t.toLowerCase().includes(q) || selected[level].has(i.v));
+      $('#efArea').innerHTML = items.length
+        ? items.map((i) => `<label style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer"><input type="checkbox" value="${esc(i.v)}" style="width:auto" ${selected[level].has(i.v) ? 'checked' : ''}/> ${esc(i.t)}</label>`).join('')
+        : `<div class="muted" style="padding:8px 10px">${level === 'ASM' ? 'No territories yet — add them under Territories.' : 'Nothing found.'}</div>`;
+    }
+    function renderManagers() {
+      const level = $('#efLevel').value;
+      const need = REPORTS_TO[level];
+      $('#efMgrWrap').style.display = need ? '' : 'none';
+      if (!need) return;
+      $('#efMgrLabel').textContent = `Reports to (${LEVEL_LABELS[need]})`;
+      const options = employeesCache.filter((x) => x.level === need && x.id !== (emp && emp.id) && x.status === 'active');
+      $('#efMgr').innerHTML = `<option value="">-- not assigned yet --</option>` + options.map((x) => `<option value="${esc(x.id)}" ${x.id === e.reporting_manager_id ? 'selected' : ''}>${esc(x.name)} — ${esc(x.area || '')}</option>`).join('');
+    }
+    $('#efArea').addEventListener('change', (ev) => {
+      const set = selected[$('#efLevel').value];
+      if (ev.target.checked) set.add(ev.target.value); else set.delete(ev.target.value);
+    });
+    $('#efLevel').onchange = () => { $('#efAreaFilter').value = ''; renderManagers(); renderArea(); };
+    $('#efAreaFilter').oninput = renderArea;
+    renderManagers(); renderArea();
+    $('#efCancel').onclick = () => { box.innerHTML = ''; };
+    $('#efSave').onclick = async () => {
+      const level = $('#efLevel').value;
+      const area = [...selected[level]];
+      const body = {
+        name: $('#efName').value.trim(), mobile: $('#efMobile').value.trim(), level,
+        reporting_manager_id: REPORTS_TO[level] ? ($('#efMgr').value || null) : null,
+        states: level === 'RM' ? area : [],
+        territory_ids: level === 'ASM' ? area : [],
+        distributor_ids: ['SO', 'SR'].includes(level) ? area : [],
+      };
+      if (emp) body.status = $('#efStatus').value;
+      $('#efErr').textContent = '';
       try {
-        await api(`/employees/${emp.id}`, { method: 'PATCH', body: JSON.stringify({
-          name: editBox.querySelector('#eeName').value,
-          mobile: editBox.querySelector('#eeMobile').value,
-          designation: editBox.querySelector('#eeDesignation').value,
-          distributor_ids: [editBox.querySelector('#eeDistributor').value],
-          status: editBox.querySelector('#eeStatus').value,
-        }) });
-        editBox.innerHTML = '';
-        loadEmployees();
-      } catch (e) { alert(e.message); }
+        if (emp) await api(`/employees/${emp.id}`, { method: 'PATCH', body: JSON.stringify(body) });
+        else await api('/employees', { method: 'POST', body: JSON.stringify(body) });
+        box.innerHTML = '';
+        await loadEmployees();
+        loadEmployeeOptions();
+      } catch (err) { $('#efErr').textContent = err.message; }
     };
+    $('#efName').focus();
   }
   let mandalsCache = [];
   function renderMandalTable() {
@@ -1806,11 +1900,7 @@ async function renderMasters() {
       loadDistributors();
     } catch (e) { alert(e.message); }
   };
-  wrap.querySelector('#addEmployee').onclick = async () => {
-    const distId = wrap.querySelector('#meDistributor').value;
-    await api('/employees', { method: 'POST', body: JSON.stringify({ name: wrap.querySelector('#meName').value, mobile: wrap.querySelector('#meMobile').value, designation: wrap.querySelector('#meDesignation').value, distributor_ids: distId ? [distId] : [] }) });
-    loadEmployees();
-  };
+  wrap.querySelector('#newEmployeeBtn').onclick = () => openEmployeeForm(null);
   wrap.querySelector('#addCategory').onclick = async () => {
     const name = wrap.querySelector('#mcName').value.trim();
     if (!name) return;
@@ -1901,4 +1991,17 @@ async function renderMasters() {
   return wrap;
 }
 
+// Pick up designation/role changes made since this device last logged in
+async function refreshSessionUser() {
+  if (!state.token || !state.user) return;
+  try {
+    const { user } = await api('/auth/me');
+    const changed = user.role !== state.user.role || user.level !== state.user.level;
+    state.user = { ...state.user, ...user };
+    localStorage.setItem('user', JSON.stringify(state.user));
+    if (changed) render();
+  } catch { /* api() already handles expired sessions */ }
+}
+
 render();
+refreshSessionUser();

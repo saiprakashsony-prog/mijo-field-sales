@@ -2,7 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../db');
-const { accountIsActive } = require('../middleware/auth');
+const { accountIsActive, authRequired } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -11,7 +11,7 @@ router.post('/login', async (req, res) => {
   if (!mobile || !password) return res.status(400).json({ error: 'Mobile and password required' });
 
   const [rows] = await pool.query(
-    `SELECT u.*, e.name AS employee_name, d.name AS distributor_name,
+    `SELECT u.*, e.name AS employee_name, d.name AS distributor_name, e.level AS employee_level,
             e.status AS employee_status, d.status AS distributor_status
      FROM users u
      LEFT JOIN employees e ON e.id = u.employee_id
@@ -38,7 +38,7 @@ router.post('/login', async (req, res) => {
     distributor_id: user.distributor_id,
   };
   const token = jwt.sign(payload, process.env.JWT_SECRET, { algorithm: 'HS256', expiresIn: '12h' });
-  res.json({ token, user: payload });
+  res.json({ token, user: { ...payload, level: user.role === 'field_employee' ? (user.employee_level || 'SR') : null } });
 });
 
 // Self-service login creation: a field employee or distributor creates their own login,
@@ -89,5 +89,8 @@ router.post('/self-register', async (req, res) => {
     throw e;
   }
 });
+
+// Current user as the server sees it now (role / designation level can change after login)
+router.get('/me', authRequired, (req, res) => res.json({ user: req.user }));
 
 module.exports = router;
