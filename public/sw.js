@@ -1,6 +1,6 @@
 // Bump this version string whenever you deploy changed static files, so old caches get
 // cleared out automatically — otherwise returning users could get stuck on stale JS/CSS.
-const CACHE_VERSION = 'mijo-v6';
+const CACHE_VERSION = 'mijo-v7';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -9,6 +9,7 @@ const APP_SHELL = [
   '/js/route-engine.js',
   '/js/dispatch.js',
   '/js/distributor-orders.js',
+  '/js/finance.js',
   '/js/india-data.js',
   '/js/register-sw.js',
   '/manifest.json',

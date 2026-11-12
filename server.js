@@ -76,6 +76,9 @@ app.use('/api/orders', require('./routes/orders'));
 app.use('/api/schemes', require('./routes/schemes').router);
 app.use('/api/dispatch', require('./routes/dispatch'));
 app.use('/api/distributor-orders', require('./routes/distributor-orders'));
+app.use('/api/integration', require('./routes/production').integration);
+app.use('/api/production', require('./routes/production').router);
+app.use('/api/finance', require('./routes/finance'));
 app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/users', require('./routes/users'));
 
@@ -99,3 +102,4 @@ process.on('unhandledRejection', (err) => console.error('Unhandled rejection:', 
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => console.log(`MIJO Field Sales server running on port ${PORT}`));
+require('./services/mms-sync').startTimer();

@@ -156,7 +156,18 @@ async function renderDistributorOrders() {
     try {
       await api(`/distributor-orders/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status: act, note }) });
       loadList();
-    } catch (err) { alert(err.message); }
+    } catch (err) {
+      // Approving more than the free stock: let the admin decide (e.g. production is due before dispatch)
+      if (act === 'approved' && /^Not enough stock/.test(err.message)) {
+        if (!confirm(`${err.message}\n\nApprove anyway?`)) return;
+        try {
+          await api(`/distributor-orders/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status: act, force: true }) });
+          loadList();
+        } catch (e2) { alert(e2.message); }
+        return;
+      }
+      alert(err.message);
+    }
   });
   await loadList();
   return wrap;

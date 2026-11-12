@@ -11,6 +11,7 @@ const pool = require('../db');
 const { authRequired } = require('../middleware/auth');
 const { safeMsg } = require('../middleware/safeError');
 const { isAreaManager, areaDistributorIds, inList } = require('../middleware/scope');
+const { stockByProduct } = require('../services/stock');
 
 const router = express.Router();
 router.use(authRequired);
@@ -200,6 +201,19 @@ router.patch('/:id/status', async (req, res) => {
   };
   if (!allowed[status]) {
     return res.status(400).json({ error: `Can't change an order from "${order.status.replace('_', ' ')}" to "${String(status).replace('_', ' ')}"` });
+  }
+  // Approving reserves stock: warn when linked SKUs don't have enough free stock (admin can still go ahead)
+  if (status === 'approved' && !req.body.force) {
+    const stock = await stockByProduct();
+    const bySku = new Map(stock.map((s) => [s.id, s]));
+    const [lines] = await pool.query('SELECT product_id, qty FROM distributor_order_lines WHERE order_id = ?', [order.id]);
+    const short = lines
+      .map((l) => ({ l, s: bySku.get(l.product_id) }))
+      .filter(({ l, s }) => s && s.linked && Number(l.qty) > s.free)
+      .map(({ l, s }) => `${s.name}: needs ${l.qty} packs, ${Math.max(0, Math.floor(s.free))} free`);
+    if (short.length) {
+      return res.status(409).json({ error: `Not enough stock — ${short.join('; ')}`, needs_confirm: true });
+    }
   }
   await pool.query(
     `UPDATE distributor_orders SET status = ?, review_note = COALESCE(?, review_note),
