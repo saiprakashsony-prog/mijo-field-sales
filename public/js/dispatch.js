@@ -257,11 +257,13 @@ function renderRouteResult(container, view, hooks = {}) {
 
 // ================= Factory → Distributor: Dispatch Planner =================
 async function renderDispatchPlanner() {
-  const [distributors, lastOrigin, plans] = await Promise.all([
+  const [distributors, lastOrigin, plans, readyOrders] = await Promise.all([
     api('/dispatch/distributors'),
     api('/dispatch/plans/last-origin'),
     api('/dispatch/plans'),
+    api('/distributor-orders/ready-for-dispatch'),
   ]);
+  const readyByDist = new Map(readyOrders.map((r) => [r.distributor_id, r]));
   const canEditLocations = ['super_admin', 'management'].includes(state.user.role);
   const canDelete = ['super_admin', 'management'].includes(state.user.role);
 
@@ -278,6 +280,13 @@ async function renderDispatchPlanner() {
     if (state.dispatch.date < localISO(new Date())) state.dispatch.date = tomorrowISO();
   }
   const D = state.dispatch;
+  if (!D.orderIds) D.orderIds = {};
+  // drop links to orders that are no longer waiting (approved elsewhere, cancelled, already planned)
+  for (const id of Object.keys(D.orderIds)) {
+    const r = readyByDist.get(Number(id));
+    D.orderIds[id] = r ? D.orderIds[id].filter((x) => r.order_ids.includes(x)) : [];
+    if (!D.orderIds[id].length) delete D.orderIds[id];
+  }
   const saveDraft = () => { try { localStorage.setItem('dispatchDraft', JSON.stringify(D)); } catch { /* storage unavailable */ } };
   const byId = new Map(distributors.map((d) => [d.id, d]));
 
@@ -301,6 +310,9 @@ async function renderDispatchPlanner() {
     </div>
 
     <div class="card">
+      ${readyOrders.length ? `<div class="dsp-info" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+        <span><b>${readyOrders.reduce((a, r) => a + r.order_ids.length, 0)} approved distributor order(s)</b> waiting for dispatch — ${fmtLoad(readyOrders.reduce((a, r) => a + r.cartons, 0))} cartons across ${readyOrders.length} distributor(s).</span>
+        <button class="btn small" id="dLoadOrders">Load approved orders</button></div>` : ''}
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
         <p class="section-title" style="margin:0">Distributor orders</p>
         <div style="display:flex;gap:6px;align-items:center"><input id="dFilter" placeholder="Search distributor / territory" style="width:220px" /><button class="btn small secondary" id="dClear">Clear cases</button></div>
@@ -332,7 +344,7 @@ async function renderDispatchPlanner() {
         <td style="white-space:normal"><b>${esc(d.name)}</b><br/><span class="muted" style="font-size:11px">${esc(d.code)}</span></td>
         <td>${esc(d.territory_name || '—')}</td>
         <td style="white-space:normal">${locationCell(d)}</td>
-        <td><input type="number" min="0" step="1" data-cases="${d.id}" value="${esc(D.cases[d.id] || '')}" placeholder="0" /></td></tr>`).join('');
+        <td><input type="number" min="0" step="0.1" data-cases="${d.id}" value="${esc(D.cases[d.id] || '')}" placeholder="0" />${D.orderIds[d.id] ? `<div class="muted" style="font-size:11px;margin-top:2px">from ${esc(readyByDist.get(d.id).order_nos)}</div>` : ''}</td></tr>`).join('');
     updateSummary();
   }
   function selected() {
@@ -371,7 +383,18 @@ async function renderDispatchPlanner() {
       renderRows(); flashToast('Location saved');
     } catch (err) { alert(err.message); }
   });
-  $('#dClear').onclick = () => { D.cases = {}; saveDraft(); renderRows(); };
+  $('#dClear').onclick = () => { D.cases = {}; D.orderIds = {}; saveDraft(); renderRows(); };
+  const loadBtn = wrap.querySelector('#dLoadOrders');
+  if (loadBtn) {
+    loadBtn.onclick = () => {
+      readyOrders.forEach((r) => {
+        D.cases[r.distributor_id] = String(Math.round(r.cartons * 10) / 10);
+        D.orderIds[r.distributor_id] = r.order_ids.slice();
+      });
+      saveDraft(); renderRows();
+      flashToast('Approved orders loaded — cases filled in');
+    };
+  }
   const bind = (id, key, fn) => { $(id).onchange = () => { D[key] = fn ? fn($(id)) : $(id).value; saveDraft(); }; };
   bind('#dDate', 'date'); bind('#dDepart', 'depart'); bind('#dVehicles', 'vehicles'); bind('#dCap', 'cap');
   bind('#dSpeed', 'speed'); bind('#dUnload', 'unload'); bind('#dRet', 'ret', (x) => x.checked);
@@ -430,14 +453,15 @@ async function renderDispatchPlanner() {
               plan_date: D.date, origin_label: D.origin.label, origin_lat: D.origin.lat, origin_lng: D.origin.lng,
               depart_time: D.depart, return_to_origin: D.ret, avg_speed_kmph: D.speed, unload_minutes: D.unload,
               capacity_cases: cap || null,
+              distributor_order_ids: sel.flatMap((d) => D.orderIds[d.id] || []),
               vehicles: view.vehicles.map((v) => ({
                 ...(v.info || {}), total_km: v.km,
                 stops: v.legs.map((l) => ({ distributor_id: l.stop.distributor_id, cases: l.stop.load, leg_km: l.km, eta_minutes: l.arrive })),
               })),
             }),
           });
-          D.cases = {}; saveDraft();
-          flashToast(`Saved as ${r.plan_no}`);
+          D.cases = {}; D.orderIds = {}; saveDraft();
+          flashToast(`Saved as ${r.plan_no}${r.linked_orders ? ` · ${r.linked_orders} distributor order(s) marked dispatch planned` : ''}`);
           state.dispatchOpenPlan = r.id;
           refreshMain();
         } catch (err) {
