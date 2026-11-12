@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS employees (
   email                 VARCHAR(150),
   date_of_joining       DATE,
   designation           VARCHAR(100),
+  level                 ENUM('RM','ASM','SO','SR') NULL,  -- RM: whole state(s) · ASM: territories · SO/SR: distributors
   reporting_manager_id  INT NULL,
   territory_id          INT,
   status                ENUM('active','inactive') DEFAULT 'active',
@@ -101,6 +102,23 @@ CREATE TABLE IF NOT EXISTS beat_days (
 );
 
 -- One employee can be mapped to multiple distributors (BRD 5)
+-- Sales hierarchy areas. A Regional Manager covers whole states; an Area Sales Manager covers
+-- territories; a Sales Officer / Sales Representative covers distributors (employee_distributors).
+CREATE TABLE IF NOT EXISTS employee_states (
+  employee_id  INT NOT NULL,
+  state        VARCHAR(100) NOT NULL,
+  PRIMARY KEY (employee_id, state),
+  FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS employee_territories (
+  employee_id   INT NOT NULL,
+  territory_id  INT NOT NULL,
+  PRIMARY KEY (employee_id, territory_id),
+  FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
+  FOREIGN KEY (territory_id) REFERENCES territories(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS employee_distributors (
   employee_id    INT NOT NULL,
   distributor_id INT NOT NULL,

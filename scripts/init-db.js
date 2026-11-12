@@ -66,6 +66,18 @@ async function migrate(conn) {
   await addColumnIfMissing('distributors', 'gps_lng', 'gps_lng DECIMAL(10,7) NULL AFTER gps_lat');
   await addColumnIfMissing('distributors', 'location_label', 'location_label VARCHAR(150) NULL AFTER gps_lng');
 
+  // Sales hierarchy: designation level. Existing employees are classified from their free-text
+  // designation once; anything unrecognised becomes a Sales Representative (SR).
+  if (!(await columnExists('employees', 'level'))) {
+    await conn.query("ALTER TABLE employees ADD COLUMN level ENUM('RM','ASM','SO','SR') NULL AFTER designation");
+    await conn.query(`UPDATE employees SET level = CASE
+        WHEN LOWER(designation) LIKE '%regional%' OR UPPER(TRIM(designation)) IN ('RM','RSM') THEN 'RM'
+        WHEN LOWER(designation) LIKE '%area sales%' OR LOWER(designation) LIKE '%area manager%' OR UPPER(TRIM(designation)) = 'ASM' THEN 'ASM'
+        WHEN LOWER(designation) LIKE '%sales officer%' OR UPPER(TRIM(designation)) = 'SO' THEN 'SO'
+        ELSE 'SR' END
+      WHERE level IS NULL`);
+  }
+
   await addColumnIfMissing('dispatch_plans', 'capacity_cases', 'capacity_cases DECIMAL(10,2) NULL AFTER unload_minutes');
 
   // Delivery executive role — safe to re-run every time (just resets the same ENUM definition)

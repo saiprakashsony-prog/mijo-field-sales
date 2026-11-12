@@ -2,6 +2,8 @@ const express = require('express');
 const pool = require('../db');
 const { authRequired, allowRoles } = require('../middleware/auth');
 
+const { areaDistributorIds, isAreaManager, inList } = require('../middleware/scope');
+
 const router = express.Router();
 router.use(authRequired);
 
@@ -19,7 +21,13 @@ router.get('/', async (req, res) => {
 
   // Role scoping, same pattern as orders: a distributor only sees their own, an employee only theirs
   if (req.user.role === 'distributor') { where.push('sr.distributor_id = ?'); params.push(req.user.distributor_id); }
-  if (req.user.role === 'field_employee') { where.push('sr.requested_by = ?'); params.push(req.user.employee_id); }
+  if (req.user.role === 'field_employee') {
+    if (req.query.scope === 'area' && isAreaManager(req.user)) {
+      where.push('sr.distributor_id IN (?)'); params.push(inList(await areaDistributorIds(req)));
+    } else {
+      where.push('sr.requested_by = ?'); params.push(req.user.employee_id);
+    }
+  }
 
   const [rows] = await pool.query(
     `SELECT sr.*, r.name AS retailer_name, r.code AS retailer_code, d.name AS distributor_name,

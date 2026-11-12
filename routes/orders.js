@@ -4,6 +4,7 @@ const { authRequired, allowRoles } = require('../middleware/auth');
 const { safeMsg } = require('../middleware/safeError');
 const { findBestScheme } = require('./schemes');
 const { computeCreditStatus } = require('./retailers');
+const { areaDistributorIds, isAreaManager, inList } = require('../middleware/scope');
 
 const router = express.Router();
 router.use(authRequired);
@@ -32,7 +33,15 @@ router.get('/', async (req, res) => {
   if (req.user.role === 'distributor' || req.user.role === 'delivery_executive') {
     where.push('o.distributor_id = ?'); params.push(req.user.distributor_id);
   }
-  if (req.user.role === 'field_employee') { where.push('o.employee_id = ?'); params.push(req.user.employee_id); }
+  // A field employee sees their own orders. RM / ASM / SO can ask for their whole area
+  // (?scope=area): every order for the distributors they cover.
+  if (req.user.role === 'field_employee') {
+    if (req.query.scope === 'area' && isAreaManager(req.user)) {
+      where.push('o.distributor_id IN (?)'); params.push(inList(await areaDistributorIds(req)));
+    } else {
+      where.push('o.employee_id = ?'); params.push(req.user.employee_id);
+    }
+  }
 
   const [rows] = await pool.query(
     `SELECT o.*, r.name AS retailer_name, r.code AS retailer_code, r.address AS retailer_address,
@@ -62,6 +71,14 @@ router.get('/:id', async (req, res) => {
     [req.params.id]
   );
   if (!order) return res.status(404).json({ error: 'Not found' });
+  // Same visibility rules as the list
+  if (['distributor', 'delivery_executive'].includes(req.user.role) && order.distributor_id !== req.user.distributor_id) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  if (req.user.role === 'field_employee' && order.employee_id !== req.user.employee_id) {
+    const area = isAreaManager(req.user) ? await areaDistributorIds(req) : [];
+    if (!area.includes(order.distributor_id)) return res.status(404).json({ error: 'Not found' });
+  }
   const [lines] = await pool.query(
     `SELECT ol.*, p.name AS product_name, p.sku_code, p.pack_size FROM order_lines ol
      JOIN products p ON p.id = ol.product_id WHERE ol.order_id = ?`,
