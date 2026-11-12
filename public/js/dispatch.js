@@ -161,6 +161,7 @@ function renderRouteResult(container, view, hooks = {}) {
           ${hooks.onDelete ? '<button class="btn small secondary" id="dspDelete">Delete plan</button>' : ''}
           <button class="btn small secondary" id="dspClose">Close</button>
         </div></div>` : ''}
+    ${view.notice ? `<div class="dsp-info">${view.notice}</div>` : ''}
     <div class="grid cols-4">
       <div class="card kpi"><div class="value">${stopsN}</div><div class="label">${view.kind === 'dispatch' ? 'distributors' : 'retailers'}</div></div>
       <div class="card kpi"><div class="value">${view.vehicles.length}</div><div class="label">vehicle${view.vehicles.length > 1 ? 's' : ''}</div></div>
@@ -169,7 +170,7 @@ function renderRouteResult(container, view, hooks = {}) {
     </div>
     <div class="card" style="padding:0;overflow:hidden"><div class="dsp-map"></div></div>
     <p class="muted" style="margin:-6px 2px 10px;font-size:12px">Lines on the map are straight between stops; distances are estimates (straight line × ${RE.ROAD_FACTOR}). Drivers should follow the Google Maps buttons for real roads.</p>
-    ${view.vehicles.length > 1 ? `<div class="dsp-vtabs">${view.vehicles.map((x, i) => `<button data-v="${i}" class="${i === vi ? 'active' : ''}"><span class="dsp-dot" style="background:${RE.COLORS[i % RE.COLORS.length]}"></span>Vehicle ${i + 1} · ${x.legs.length} stops · ${Math.round(x.km)} km</button>`).join('')}</div>` : ''}
+    ${view.vehicles.length > 1 ? `<div class="dsp-vtabs">${view.vehicles.map((x, i) => `<button data-v="${i}" class="${i === vi ? 'active' : ''}"><span class="dsp-dot" style="background:${RE.COLORS[i % RE.COLORS.length]}"></span>Vehicle ${i + 1} · ${x.legs.length} stop${x.legs.length === 1 ? "" : "s"} · ${Math.round(x.km)} km</button>`).join('')}</div>` : ''}
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">
         <div><p class="section-title" style="margin-bottom:4px">${view.vehicles.length > 1 ? `Vehicle ${vi + 1} — ` : ''}Driver route sheet</p>
@@ -395,17 +396,32 @@ async function renderDispatchPlanner() {
       };
     });
     const departMinutes = RE.timeToMinutes(D.depart);
+    const cap = Number(D.cap) || 0;
     const vehicles = RE.plan(D.origin, stops, {
-      vehicles: Number(D.vehicles), returnToDepot: D.ret, departMinutes, speedKmph: D.speed, unloadMinutes: D.unload,
+      vehicles: Number(D.vehicles), returnToDepot: D.ret, departMinutes, speedKmph: D.speed, unloadMinutes: D.unload, capacity: cap,
     });
+    vehicles.forEach((v) => v.legs.forEach((l) => {
+      if (l.stop.part) l.stop = { ...l.stop, title: `${l.stop.title} (part ${l.stop.part} of ${l.stop.parts})` };
+      l.stop.loadText = `${fmtLoad(l.stop.load)} cases`;
+    }));
+    const meta = vehicles.meta;
+    const total = stops.reduce((a, x) => a + x.load, 0);
+    const notes = [];
+    if (cap && meta.used > meta.requested) {
+      notes.push(`Total load is <b>${fmtLoad(total)} cases</b> and each vehicle carries at most <b>${fmtLoad(cap)}</b>, so this plan uses <b>${meta.used} vehicles</b> (you selected ${meta.requested}).`);
+    }
+    meta.splits.forEach((x) => notes.push(`<b>${esc(x.stop.title)}</b> ordered ${fmtLoad(x.stop.load)} cases — more than one vehicle — so it is delivered in ${x.parts.length} parts: ${x.parts.map(fmtLoad).join(' + ')} cases.`));
+    if (!cap) notes.push('No vehicle capacity set — enter it above so no truck is overloaded.');
     const view = {
       kind: 'dispatch', unit: 'cases', depot: D.origin, departMinutes, returnToDepot: D.ret, dateISO: D.date,
-      cap: Number(D.cap) || 0, vehicles, saved: null, active: 0,
+      cap, vehicles, saved: null, active: 0, notice: notes.join('<br/>'),
     };
     renderRouteResult($('#dResult'), view, {
       showDriverFields: true,
       onSave: async (btn, errBox) => {
         errBox.textContent = '';
+        const over = view.vehicles.findIndex((v) => cap && v.load > cap + 1e-9);
+        if (over >= 0) { errBox.textContent = `Vehicle ${over + 1} is over capacity — plan again.`; return; }
         btn.disabled = true; btn.textContent = 'Saving...';
         try {
           const r = await api('/dispatch/plans', {
@@ -413,6 +429,7 @@ async function renderDispatchPlanner() {
             body: JSON.stringify({
               plan_date: D.date, origin_label: D.origin.label, origin_lat: D.origin.lat, origin_lng: D.origin.lng,
               depart_time: D.depart, return_to_origin: D.ret, avg_speed_kmph: D.speed, unload_minutes: D.unload,
+              capacity_cases: cap || null,
               vehicles: view.vehicles.map((v) => ({
                 ...(v.info || {}), total_km: v.km,
                 stops: v.legs.map((l) => ({ distributor_id: l.stop.distributor_id, cases: l.stop.load, leg_km: l.km, eta_minutes: l.arrive })),
@@ -447,9 +464,11 @@ async function renderDispatchPlanner() {
     const p = await api(`/dispatch/plans/${id}`);
     const depot = { lat: Number(p.origin_lat), lng: Number(p.origin_lng), label: p.origin_label };
     const departMinutes = RE.timeToMinutes(String(p.depart_time).slice(0, 5));
+    const seen = {};
+    p.vehicles.forEach((v) => v.stops.forEach((s) => { seen[s.distributor_id] = (seen[s.distributor_id] || 0) + 1; }));
     const vehicles = p.vehicles.map((v) => {
       const seq = v.stops.map((s) => ({
-        distributor_id: s.distributor_id, title: s.distributor_name, area: s.location_label || '', phone: s.distributor_mobile,
+        distributor_id: s.distributor_id, title: s.distributor_name + (seen[s.distributor_id] > 1 ? ' (split delivery)' : ''), area: s.location_label || '', phone: s.distributor_mobile,
         lat: Number(s.gps_lat), lng: Number(s.gps_lng), load: Number(s.cases), loadText: `${fmtLoad(s.cases)} cases`,
       }));
       const sch = RE.schedule(depot, seq, { returnToDepot: !!p.return_to_origin, departMinutes, speedKmph: p.avg_speed_kmph, unloadMinutes: p.unload_minutes });
@@ -459,7 +478,7 @@ async function renderDispatchPlanner() {
     });
     const view = {
       kind: 'dispatch', unit: 'cases', depot, departMinutes, returnToDepot: !!p.return_to_origin, dateISO: String(p.plan_date).slice(0, 10),
-      vehicles, saved: { id: p.id, plan_no: p.plan_no, status: p.status }, active: 0,
+      cap: Number(p.capacity_cases) || 0, vehicles, saved: { id: p.id, plan_no: p.plan_no, status: p.status }, active: 0,
     };
     const box = $('#dResult');
     renderRouteResult(box, view, {

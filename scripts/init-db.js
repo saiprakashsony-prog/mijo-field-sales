@@ -66,6 +66,8 @@ async function migrate(conn) {
   await addColumnIfMissing('distributors', 'gps_lng', 'gps_lng DECIMAL(10,7) NULL AFTER gps_lat');
   await addColumnIfMissing('distributors', 'location_label', 'location_label VARCHAR(150) NULL AFTER gps_lng');
 
+  await addColumnIfMissing('dispatch_plans', 'capacity_cases', 'capacity_cases DECIMAL(10,2) NULL AFTER unload_minutes');
+
   // Delivery executive role — safe to re-run every time (just resets the same ENUM definition)
   await conn.query(
     `ALTER TABLE users MODIFY COLUMN role ENUM('super_admin','management','sales_manager','field_employee','distributor','delivery_executive') NOT NULL`

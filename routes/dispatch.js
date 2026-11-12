@@ -120,13 +120,27 @@ router.post('/plans', allowRoles(...PLANNERS), async (req, res) => {
   if (!validLatLng(originLat, originLng)) return res.status(400).json({ error: 'Start location is missing or invalid' });
   if (!/^\d{2}:\d{2}$/.test(b.depart_time || '')) return res.status(400).json({ error: 'Departure time is required' });
   const vehicles = Array.isArray(b.vehicles) ? b.vehicles : [];
-  if (!vehicles.length || vehicles.length > 10) return res.status(400).json({ error: 'A plan needs between 1 and 10 vehicles' });
+  if (!vehicles.length || vehicles.length > 30) return res.status(400).json({ error: 'A plan needs between 1 and 30 vehicles' });
+  const capacity = b.capacity_cases === null || b.capacity_cases === undefined || b.capacity_cases === '' ? 0 : Number(b.capacity_cases);
+  if (!Number.isFinite(capacity) || capacity < 0) return res.status(400).json({ error: 'Invalid vehicle capacity' });
+  if (capacity > 0) {
+    for (let i = 0; i < vehicles.length; i++) {
+      const load = (Array.isArray(vehicles[i].stops) ? vehicles[i].stops : []).reduce((a, s) => a + (Number(s.cases) || 0), 0);
+      if (load > capacity + 1e-6) {
+        return res.status(400).json({ error: `Vehicle ${i + 1} carries ${load} cases, more than its ${capacity}-case capacity` });
+      }
+    }
+  }
 
   const allStops = vehicles.flatMap((v) => (Array.isArray(v.stops) ? v.stops : []));
   if (!allStops.length) return res.status(400).json({ error: 'A plan needs at least one distributor stop' });
   if (allStops.length > 200) return res.status(400).json({ error: 'Too many stops in one plan' });
+  // A distributor may be split across vehicles (order bigger than one truck), but not repeated within one vehicle
+  for (const v of vehicles) {
+    const vIds = (Array.isArray(v.stops) ? v.stops : []).map((s) => Number(s.distributor_id));
+    if (new Set(vIds).size !== vIds.length) return res.status(400).json({ error: 'A distributor appears twice in the same vehicle' });
+  }
   const ids = [...new Set(allStops.map((s) => Number(s.distributor_id)))];
-  if (ids.length !== allStops.length) return res.status(400).json({ error: 'A distributor appears more than once in this plan' });
   const [found] = await pool.query(`SELECT id FROM distributors WHERE id IN (${ids.map(() => '?').join(',')})`, ids);
   if (found.length !== ids.length) return res.status(400).json({ error: 'One or more distributors no longer exist' });
 
@@ -137,11 +151,11 @@ router.post('/plans', allowRoles(...PLANNERS), async (req, res) => {
     const planNo = genPlanNo();
     const [r] = await conn.query(
       `INSERT INTO dispatch_plans (plan_no, plan_date, origin_label, origin_lat, origin_lng, depart_time, return_to_origin,
-                                   avg_speed_kmph, unload_minutes, total_km, notes, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                                   avg_speed_kmph, unload_minutes, capacity_cases, total_km, notes, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [planNo, b.plan_date, str(b.origin_label, 150) || 'Start', originLat, originLng, b.depart_time + ':00',
         b.return_to_origin ? 1 : 0, Math.round(Number(b.avg_speed_kmph) || 40), Math.round(Number(b.unload_minutes) || 0),
-        Math.round(totalKm * 10) / 10, str(b.notes, 255), req.user.id]
+        capacity > 0 ? capacity : null, Math.round(totalKm * 10) / 10, str(b.notes, 255), req.user.id]
     );
     const planId = r.insertId;
     for (let i = 0; i < vehicles.length; i++) {

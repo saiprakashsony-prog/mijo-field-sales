@@ -49,6 +49,56 @@ router.post('/', allowRoles('super_admin', 'management'), async (req, res) => {
   }
 });
 
+// Edit name and district list. Removing a district is blocked while a distributor in this
+// territory still serves mandals in it — unmap those mandals first.
+router.put('/:id', allowRoles('super_admin', 'management'), async (req, res) => {
+  const id = Number(req.params.id);
+  const name = String(req.body.name || '').trim();
+  const { districts } = req.body;
+  if (!name) return res.status(400).json({ error: 'name is required' });
+  if (!Array.isArray(districts) || !districts.length) {
+    return res.status(400).json({ error: 'At least one district is required' });
+  }
+  const [[territory]] = await pool.query('SELECT id FROM territories WHERE id = ?', [id]);
+  if (!territory) return res.status(404).json({ error: 'Territory not found' });
+
+  const keep = new Set(districts.map((d) => `${d.state}|${d.district}`));
+  const [inUse] = await pool.query(
+    `SELECT DISTINCT m.state, m.district, d.name AS distributor_name
+     FROM distributor_mandals dm
+     JOIN mandals m ON m.id = dm.mandal_id
+     JOIN distributors d ON d.id = dm.distributor_id
+     WHERE d.territory_id = ?`,
+    [id]
+  );
+  const blocked = inUse.filter((r) => !keep.has(`${r.state}|${r.district}`));
+  if (blocked.length) {
+    const list = blocked.map((r) => `${r.district} (${r.distributor_name})`).join(', ');
+    return res.status(409).json({ error: `Can't remove these districts — distributors still serve mandals there: ${list}. Unmap those mandals first.` });
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.query('UPDATE territories SET name = ?, state = ?, district = ? WHERE id = ?',
+      [name, districts[0].state, districts[0].district, id]);
+    await conn.query('DELETE FROM territory_districts WHERE territory_id = ?', [id]);
+    for (const d of districts) {
+      await conn.query(
+        'INSERT INTO territory_districts (territory_id, state, district) VALUES (?, ?, ?)',
+        [id, d.state, d.district]
+      );
+    }
+    await conn.commit();
+    res.json({ ok: true });
+  } catch (e) {
+    await conn.rollback();
+    res.status(400).json({ error: safeMsg(e) });
+  } finally {
+    conn.release();
+  }
+});
+
 router.delete('/:id', allowRoles('super_admin', 'management'), async (req, res) => {
   try {
     await pool.query('DELETE FROM territories WHERE id = ?', [req.params.id]);
