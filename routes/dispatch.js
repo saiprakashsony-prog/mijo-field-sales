@@ -106,8 +106,11 @@ router.get('/plans/:id', allowRoles(...PLANNERS), async (req, res) => {
      ORDER BY s.vehicle_no, s.stop_seq`,
     [plan.id]
   );
+  const [linkedOrders] = await pool.query(
+    'SELECT id, order_no, distributor_id, total_cartons, status FROM distributor_orders WHERE dispatch_plan_id = ? ORDER BY id', [plan.id]);
   res.json({
     ...plan,
+    linked_orders: linkedOrders,
     vehicles: vehicles.map((v) => ({ ...v, stops: stops.filter((s) => s.vehicle_no === v.vehicle_no) })),
   });
 });
@@ -177,8 +180,19 @@ router.post('/plans', allowRoles(...PLANNERS), async (req, res) => {
         );
       }
     }
+    // Link approved distributor orders loaded into this plan (only ones for distributors on it)
+    const orderIds = [...new Set((Array.isArray(b.distributor_order_ids) ? b.distributor_order_ids : []).map(Number).filter(Boolean))];
+    let linked = 0;
+    if (orderIds.length) {
+      const [r2] = await conn.query(
+        `UPDATE distributor_orders SET status = 'dispatch_planned', dispatch_plan_id = ?
+         WHERE id IN (?) AND status = 'approved' AND dispatch_plan_id IS NULL AND distributor_id IN (?)`,
+        [planId, orderIds, ids]
+      );
+      linked = r2.affectedRows;
+    }
     await conn.commit();
-    res.status(201).json({ id: planId, plan_no: planNo });
+    res.status(201).json({ id: planId, plan_no: planNo, linked_orders: linked });
   } catch (e) {
     await conn.rollback();
     res.status(400).json({ error: safeMsg(e) });
@@ -194,6 +208,7 @@ router.patch('/plans/:id', allowRoles(...PLANNERS), async (req, res) => {
   if (status !== undefined) {
     if (!['planned', 'dispatched', 'completed', 'cancelled'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
     await pool.query('UPDATE dispatch_plans SET status = ? WHERE id = ?', [status, plan.id]);
+    await syncLinkedOrders(plan.id, status);
   }
   // Vehicle / driver details can be filled in after the plan is saved
   if (Array.isArray(vehicles)) {
@@ -207,7 +222,25 @@ router.patch('/plans/:id', allowRoles(...PLANNERS), async (req, res) => {
   res.json({ ok: true });
 });
 
+// Distributor orders on a plan follow it: dispatched → dispatched, completed → delivered,
+// cancelled (or plan deleted) → released back to approved so they can be planned again.
+async function syncLinkedOrders(planId, planStatus) {
+  if (planStatus === 'cancelled') {
+    await pool.query(
+      `UPDATE distributor_orders SET status = 'approved', dispatch_plan_id = NULL
+       WHERE dispatch_plan_id = ? AND status IN ('dispatch_planned','dispatched')`, [planId]);
+    return;
+  }
+  const map = { planned: 'dispatch_planned', dispatched: 'dispatched', completed: 'delivered' };
+  if (map[planStatus]) {
+    await pool.query(
+      `UPDATE distributor_orders SET status = ? WHERE dispatch_plan_id = ? AND status IN ('dispatch_planned','dispatched','delivered')`,
+      [map[planStatus], planId]);
+  }
+}
+
 router.delete('/plans/:id', allowRoles('super_admin', 'management'), async (req, res) => {
+  await syncLinkedOrders(Number(req.params.id), 'cancelled');
   await pool.query('DELETE FROM dispatch_plans WHERE id = ?', [req.params.id]);
   res.json({ ok: true });
 });

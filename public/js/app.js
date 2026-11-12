@@ -201,18 +201,18 @@ function tabsForUser() {
   const tabs = (TABS_BY_ROLE[state.user.role] || []).slice();
   if (isAreaManager()) {
     const at = tabs.findIndex((t) => t[0] === 'myorders') + 1;
-    tabs.splice(at, 0, ['areadash', 'Area Dashboard'], ['areaorders', 'Area Orders'], ['team', 'My Team']);
+    tabs.splice(at, 0, ['areadash', 'Area Dashboard'], ['areaorders', 'Area Orders'], ['dorders', 'Distributor Orders'], ['team', 'My Team']);
   }
   return tabs;
 }
 
 const TABS_BY_ROLE = {
   field_employee: [['myroute', 'My Route'], ['newretailer', 'New Retailer'], ['booking', 'Book Order'], ['myorders', 'My Orders'], ['returns', 'Returns']],
-  distributor: [['orderbook', 'Order Book'], ['consolidated', 'Consolidated Picking List'], ['deliveryroute', 'Delivery Route'], ['returns', 'Returns']],
+  distributor: [['orderbook', 'Order Book'], ['consolidated', 'Consolidated Picking List'], ['deliveryroute', 'Delivery Route'], ['dorders', 'Stock Orders'], ['returns', 'Returns']],
   delivery_executive: [['deliveries', 'My Deliveries'], ['deliveryroute', 'Delivery Route']],
-  sales_manager: [['dashboard', 'Dashboard'], ['orders', 'All Orders'], ['dispatch', 'Dispatch Planner'], ['returns', 'Returns'], ['masters', 'Masters']],
-  management: [['dashboard', 'Dashboard'], ['orders', 'All Orders'], ['dispatch', 'Dispatch Planner'], ['returns', 'Returns'], ['masters', 'Masters']],
-  super_admin: [['dashboard', 'Dashboard'], ['orders', 'All Orders'], ['dispatch', 'Dispatch Planner'], ['returns', 'Returns'], ['masters', 'Masters']],
+  sales_manager: [['dashboard', 'Dashboard'], ['orders', 'All Orders'], ['dorders', 'Distributor Orders'], ['dispatch', 'Dispatch Planner'], ['returns', 'Returns'], ['masters', 'Masters']],
+  management: [['dashboard', 'Dashboard'], ['orders', 'All Orders'], ['dorders', 'Distributor Orders'], ['dispatch', 'Dispatch Planner'], ['returns', 'Returns'], ['masters', 'Masters']],
+  super_admin: [['dashboard', 'Dashboard'], ['orders', 'All Orders'], ['dorders', 'Distributor Orders'], ['dispatch', 'Dispatch Planner'], ['returns', 'Returns'], ['masters', 'Masters']],
 };
 
 function renderShell() {
@@ -251,6 +251,7 @@ function renderShell() {
     areadash: renderAreaDashboard,
     areaorders: renderAreaOrders,
     team: renderTeam,
+    dorders: renderDistributorOrders,
   };
   (renderers[state.tab] || (() => el('<div/>')))().then((node) => main.appendChild(node)).catch((e) => {
     main.appendChild(el(`<div class="card error-msg">${esc(e.message)}</div>`));
@@ -273,6 +274,7 @@ function refreshMain() {
     areadash: renderAreaDashboard,
     areaorders: renderAreaOrders,
     team: renderTeam,
+    dorders: renderDistributorOrders,
   };
   renderers[state.tab]().then((node) => main.appendChild(node));
 }

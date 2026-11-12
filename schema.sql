@@ -351,6 +351,43 @@ CREATE TABLE IF NOT EXISTS audit_log (
   created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Distributor (primary) orders: stock a distributor buys from MIJO, booked by an ASM / SO
+-- (or an admin) on the distributor's behalf. Approved orders feed the Dispatch Planner.
+CREATE TABLE IF NOT EXISTS distributor_orders (
+  id                 INT AUTO_INCREMENT PRIMARY KEY,
+  order_no           VARCHAR(40) UNIQUE NOT NULL,
+  order_date         DATE NOT NULL,
+  distributor_id     INT NOT NULL,
+  booked_by_employee INT NULL,        -- employees.id when an ASM / SO booked it
+  booked_by_user     INT NOT NULL,    -- users.id
+  status             ENUM('submitted','approved','rejected','dispatch_planned','dispatched','delivered','cancelled') NOT NULL DEFAULT 'submitted',
+  total_cartons      DECIMAL(10,2) NOT NULL DEFAULT 0,
+  total_amount       DECIMAL(12,2) NOT NULL DEFAULT 0,
+  notes              VARCHAR(255),
+  reviewed_by        INT NULL,        -- users.id who approved / rejected
+  reviewed_at        DATETIME NULL,
+  review_note        VARCHAR(255),
+  dispatch_plan_id   INT NULL,
+  created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (distributor_id) REFERENCES distributors(id),
+  INDEX idx_do_status (status),
+  INDEX idx_do_distributor (distributor_id)
+);
+
+CREATE TABLE IF NOT EXISTS distributor_order_lines (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  order_id    INT NOT NULL,
+  product_id  INT NOT NULL,
+  carton_qty  INT NOT NULL DEFAULT 0,
+  pack_qty    INT NOT NULL DEFAULT 0,
+  qty         INT NOT NULL,              -- total packs = carton_qty * units_per_carton + pack_qty
+  rate        DECIMAL(10,2) NOT NULL,    -- Distributor Price per pack (GST-inclusive)
+  gst_amt     DECIMAL(12,2) NOT NULL DEFAULT 0,
+  net_amount  DECIMAL(12,2) NOT NULL,
+  FOREIGN KEY (order_id) REFERENCES distributor_orders(id) ON DELETE CASCADE,
+  FOREIGN KEY (product_id) REFERENCES products(id)
+);
+
 -- Dispatch planning: a saved plan for shipping stock from the factory (origin) to distributors,
 -- split across one or more vehicles. Each vehicle's stops are stored in delivery order; the
 -- truck is loaded in the reverse of that order (last drop goes in first).
