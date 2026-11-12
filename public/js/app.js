@@ -1022,7 +1022,8 @@ async function renderMasters() {
             <div class="muted" style="padding:8px 10px">Select a state first.</div>
           </div>
         </div>
-        <button class="btn small" id="addTerritory">Add Territory</button>
+ <button class="btn small" id="addTerritory">Add Territory</button>
+        <button class="btn small secondary" id="cancelTerritoryEdit" style="display:none">Cancel</button>
         <div id="territoryList" style="margin-top:10px"></div>
       </div>
       </div>
@@ -1244,7 +1245,10 @@ async function renderMasters() {
     const rows = await api('/territories');
     territoriesCache = rows;
     const box = wrap.querySelector('#territoryList');
-    box.innerHTML = `<table><thead><tr><th>Name</th><th>State</th><th>Districts</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}"><td>${esc(r.name)}</td><td>${esc((r.districts && r.districts[0]) ? r.districts[0].state : (r.state || ''))}</td><td>${esc((r.districts || []).map((d) => d.district).join(', '))}</td><td><button class="btn small secondary delTerritoryBtn">Delete</button></td></tr>`).join('')}</tbody></table>`;
+    box.innerHTML = `<table><thead><tr><th>Name</th><th>State</th><th>Districts</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}"><td>${esc(r.name)}</td><td>${esc((r.districts && r.districts[0]) ? r.districts[0].state : (r.state || ''))}</td><td>${esc((r.districts || []).map((d) => d.district).join(', '))}</td><td style="white-space:nowrap"><button class="btn small secondary editTerritoryBtn">Edit</button> <button class="btn small secondary delTerritoryBtn">Delete</button></td></tr>`).join('')}</tbody></table>`;
+    box.querySelectorAll('.editTerritoryBtn').forEach((btn) => {
+      btn.onclick = () => startTerritoryEdit(rows.find((t) => String(t.id) === btn.closest('tr').dataset.id));
+    });
     box.querySelectorAll('.delTerritoryBtn').forEach((btn) => {
       btn.onclick = async () => {
         if (!confirm('Delete this territory?')) return;
@@ -1710,26 +1714,55 @@ async function renderMasters() {
     };
   }
 
-  wrap.querySelector('#mtState').onchange = (e) => {
-    const districts = window.INDIA_STATES_DISTRICTS[e.target.value] || [];
+  function renderDistrictChecks(stateName, checked = []) {
+    const districts = window.INDIA_STATES_DISTRICTS[stateName] || [];
     const box = wrap.querySelector('#mtDistrictChecks');
-    box.innerHTML = districts.length
-      ? districts.map((d) => `<label style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer"><input type="checkbox" class="mtDistrictCheck" value="${d}" style="width:auto"/> ${d}</label>`).join('')
+    // keep districts already on the territory visible even if the master list spells them differently
+    const all = [...new Set([...districts, ...checked])];
+    box.innerHTML = all.length
+      ? all.map((d) => `<label style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer"><input type="checkbox" class="mtDistrictCheck" value="${esc(d)}" style="width:auto" ${checked.includes(d) ? 'checked' : ''}/> ${esc(d)}</label>`).join('')
       : '<div class="muted" style="padding:8px 10px">Select a state first.</div>';
-  };
+  }
+  wrap.querySelector('#mtState').onchange = (e) => renderDistrictChecks(e.target.value);
+
+  let editingTerritoryId = null;
+  function resetTerritoryForm() {
+    editingTerritoryId = null;
+    wrap.querySelector('#mtName').value = '';
+    wrap.querySelector('#mtState').value = '';
+    wrap.querySelector('#mtDistrictChecks').innerHTML = '<div class="muted" style="padding:8px 10px">Select a state first.</div>';
+    wrap.querySelector('#addTerritory').textContent = 'Add Territory';
+    wrap.querySelector('#cancelTerritoryEdit').style.display = 'none';
+  }
+  function startTerritoryEdit(t) {
+    if (!t) return;
+    editingTerritoryId = t.id;
+    const st = (t.districts[0] && t.districts[0].state) || t.state || '';
+    wrap.querySelector('#mtName').value = t.name;
+    const sel = wrap.querySelector('#mtState');
+    if (st && ![...sel.options].some((o) => o.value === st)) sel.appendChild(el(`<option value="${esc(st)}">${esc(st)}</option>`));
+    sel.value = st;
+    renderDistrictChecks(st, t.districts.filter((d) => d.state === st).map((d) => d.district));
+    wrap.querySelector('#addTerritory').textContent = 'Save changes';
+    wrap.querySelector('#cancelTerritoryEdit').style.display = '';
+    wrap.querySelector('#mtName').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    wrap.querySelector('#mtName').focus();
+  }
+  wrap.querySelector('#cancelTerritoryEdit').onclick = resetTerritoryForm;
 
   wrap.querySelector('#addTerritory').onclick = async () => {
     const state = wrap.querySelector('#mtState').value;
     const checked = [...wrap.querySelectorAll('.mtDistrictCheck:checked')].map((c) => c.value);
+    if (!wrap.querySelector('#mtName').value.trim()) { alert('Enter a territory name.'); return; }
     if (!state || !checked.length) { alert('Select a state and at least one district.'); return; }
     try {
-      await api('/territories', { method: 'POST', body: JSON.stringify({
-        name: wrap.querySelector('#mtName').value,
+      const body = JSON.stringify({
+        name: wrap.querySelector('#mtName').value.trim(),
         districts: checked.map((district) => ({ state, district })),
-      }) });
-      wrap.querySelector('#mtName').value = '';
-      wrap.querySelector('#mtState').value = '';
-      wrap.querySelector('#mtDistrictChecks').innerHTML = '<div class="muted" style="padding:8px 10px">Select a state first.</div>';
+      });
+      if (editingTerritoryId) await api(`/territories/${editingTerritoryId}`, { method: 'PUT', body });
+      else await api('/territories', { method: 'POST', body });
+      resetTerritoryForm();
       loadTerritories();
     } catch (e) { alert(e.message); }
   };

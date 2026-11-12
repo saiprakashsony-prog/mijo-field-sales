@@ -347,6 +347,7 @@ CREATE TABLE IF NOT EXISTS dispatch_plans (
   return_to_origin TINYINT(1) NOT NULL DEFAULT 1,
   avg_speed_kmph   INT NOT NULL DEFAULT 40,
   unload_minutes   INT NOT NULL DEFAULT 30,
+  capacity_cases   DECIMAL(10,2) NULL,     -- max cases per vehicle; every vehicle in the plan must fit
   total_km         DECIMAL(10,1) NOT NULL DEFAULT 0,
   status           ENUM('planned','dispatched','completed','cancelled') DEFAULT 'planned',
   notes            VARCHAR(255),

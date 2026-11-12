@@ -152,3 +152,4 @@ th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: upp
 .modal-card { width: 100%; max-width: 620px; max-height: 94vh; overflow-y: auto; margin: 0; }
 .dsp-toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #111827; color: #fff; padding: 8px 14px; border-radius: 6px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 6000; }
 .dsp-toast.show { opacity: 1; }
+.dsp-info { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e3a8a; border-radius: 6px; padding: 8px 10px; font-size: 13px; margin: 0 0 12px; line-height: 1.5; }
