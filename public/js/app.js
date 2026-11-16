@@ -28,7 +28,8 @@ function el(html) {
 }
 function fmtMoney(n) { return '₹' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 }); }
 function fmtDate(d) { return d ? new Date(d).toLocaleString('en-IN') : ''; }
-function todayISO() { return new Date().toISOString().slice(0, 10); }
+// Local (IST) date — toISOString() alone is UTC, which is still yesterday before 5:30 AM IST
+function todayISO() { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); }
 
 // Escapes text before it goes into an HTML template. Every value the API returns that a person
 // typed (names, addresses, reasons, notes...) must pass through this, or it can run as code in
@@ -871,26 +872,43 @@ async function renderDeliveries() {
 }
 
 // ---------- Management: Dashboard ----------
+// Two views: Retail Sales (secondary — retailer orders booked by the field team) and
+// Distributor Sales (primary — stock MIJO sells and dispatches to distributors).
 async function renderDashboard() {
+  const view = state.dashView === 'distributor' ? 'distributor' : 'retail';
+  const body = view === 'distributor' ? await renderDistributorDashboard() : await renderRetailDashboard();
+  const node = el(`<div>
+    <div class="dash-switch">
+      <button data-dv="retail" class="${view === 'retail' ? 'active' : ''}">Retail Sales</button>
+      <button data-dv="distributor" class="${view === 'distributor' ? 'active' : ''}">Distributor Sales</button>
+    </div></div>`);
+  node.querySelectorAll('[data-dv]').forEach((b) => {
+    b.onclick = () => { if (state.dashView !== b.dataset.dv) { state.dashView = b.dataset.dv; render(); } };
+  });
+  node.appendChild(body);
+  return node;
+}
+
+async function renderRetailDashboard() {
   const date = todayISO();
   const d = await api(`/dashboard/summary?date=${date}`);
   const wrap = el(`
     <div>
       <div class="grid cols-4">
-        <div class="card kpi"><div class="value">${esc(d.orderStats.order_count)}</div><div class="label">Today's Orders</div></div>
-        <div class="card kpi"><div class="value">${fmtMoney(d.orderStats.order_value)}</div><div class="label">Order Value</div></div>
+        <div class="card kpi"><div class="value">${esc(d.orderStats.order_count)}</div><div class="label">Retailer Orders Today</div></div>
+        <div class="card kpi"><div class="value">${fmtMoney(d.orderStats.order_value)}</div><div class="label">Retailer Order Value Today</div></div>
         <div class="card kpi"><div class="value">${esc(d.retailerStats.new_today)}</div><div class="label">New Retailers Today</div></div>
         <div class="card kpi"><div class="value">${d.visitStats.total_visits || 0}</div><div class="label">Field Visits Today</div></div>
       </div>
       <div class="grid cols-2">
         <div class="card">
-          <p class="section-title">Orders by Distributor</p>
+          <p class="section-title">Retailer Orders Today by Distributor</p>
           <div class="chart-box" style="height:180px"><canvas id="chartByDistributor"></canvas></div>
           <table><thead><tr><th>Distributor</th><th>Orders</th><th>Value</th></tr></thead>
           <tbody>${d.byDistributor.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.order_count)}</td><td>${fmtMoney(r.order_value)}</td></tr>`).join('')}</tbody></table>
         </div>
         <div class="card">
-          <p class="section-title">Orders by Sales Employee</p>
+          <p class="section-title">Retailer Orders Today by Sales Employee</p>
           <div class="chart-box" style="height:180px"><canvas id="chartByEmployee"></canvas></div>
           <table><thead><tr><th>Employee</th><th>Orders</th><th>Value</th></tr></thead>
           <tbody>${d.byEmployee.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.order_count)}</td><td>${fmtMoney(r.order_value)}</td></tr>`).join('')}</tbody></table>
@@ -904,7 +922,7 @@ async function renderDashboard() {
           <tbody>${d.topSkus.map((r) => `<tr><td>${esc(r.name)} (${esc(r.sku_code)})</td><td>${esc(r.qty)}</td><td>${fmtMoney(r.value)}</td></tr>`).join('')}</tbody></table>
         </div>
         <div class="card">
-          <p class="section-title">Orders by Status</p>
+          <p class="section-title">Retailer Orders Today by Status</p>
           <div class="chart-box" style="height:180px"><canvas id="chartByStatus"></canvas></div>
           <table><thead><tr><th>Status</th><th>Count</th><th>Value</th></tr></thead>
           <tbody>${d.byStatus.map((r) => `<tr><td><span class="badge ${esc(r.status)}">${r.status.replace(/_/g, ' ')}</span></td><td>${esc(r.cnt)}</td><td>${fmtMoney(r.value)}</td></tr>`).join('')}</tbody></table>

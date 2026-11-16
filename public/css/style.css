@@ -163,3 +163,8 @@ th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: upp
   .do-grid td.hide-m { display: none; }
   .do-grid td[data-l]::before { content: attr(data-l); display: block; font-size: 11px; color: var(--muted); }
 }
+
+/* Dashboard view switch: Retail Sales | Distributor Sales */
+.dash-switch { display: inline-flex; background: #fff; border: 1px solid var(--border, #e5e7eb); border-radius: 10px; padding: 3px; margin-bottom: 12px; gap: 2px; }
+.dash-switch button { border: 0; background: transparent; padding: 7px 16px; border-radius: 7px; font-weight: 600; font-size: 14px; color: #555; cursor: pointer; }
+.dash-switch button.active { background: var(--brand); color: #fff; }

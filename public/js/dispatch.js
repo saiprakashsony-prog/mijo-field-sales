@@ -445,6 +445,11 @@ async function renderDispatchPlanner() {
         errBox.textContent = '';
         const over = view.vehicles.findIndex((v) => cap && v.load > cap + 1e-9);
         if (over >= 0) { errBox.textContent = `Vehicle ${over + 1} is over capacity — plan again.`; return; }
+        // Approved orders for distributors on this plan that were not loaded via "Load approved orders"
+        const unlinked = sel.filter((d) => readyByDist.has(d.id) && !(D.orderIds[d.id] || []).length);
+        if (unlinked.length && confirm(`${unlinked.length} distributor(s) on this plan have approved orders that are not linked (${unlinked.map((d) => readyByDist.get(d.id).order_nos).join(', ')}).\n\nLink them to this plan so they show as dispatched?`)) {
+          unlinked.forEach((d) => { D.orderIds[d.id] = readyByDist.get(d.id).order_ids.slice(); });
+        }
         btn.disabled = true; btn.textContent = 'Saving...';
         try {
           const r = await api('/dispatch/plans', {
@@ -504,6 +509,14 @@ async function renderDispatchPlanner() {
       kind: 'dispatch', unit: 'cases', depot, departMinutes, returnToDepot: !!p.return_to_origin, dateISO: String(p.plan_date).slice(0, 10),
       cap: Number(p.capacity_cases) || 0, vehicles, saved: { id: p.id, plan_no: p.plan_no, status: p.status }, active: 0,
     };
+    const planDists = new Set(p.vehicles.flatMap((v) => v.stops.map((s) => s.distributor_id)));
+    const pending = p.status === 'cancelled' ? [] : readyOrders.filter((r) => planDists.has(r.distributor_id));
+    const linkedNote = p.linked_orders.length
+      ? `${p.linked_orders.length} distributor order(s) on this plan: ${p.linked_orders.map((o) => esc(o.order_no)).join(', ')}`
+      : 'No distributor orders are linked to this plan, so nothing shows as dispatched under Distributor Orders.';
+    view.notice = linkedNote + (pending.length
+      ? `<br/>Approved orders waiting for these distributors: ${pending.map((r) => esc(r.order_nos)).join(', ')} <button class="btn small" id="dspLinkOrders" style="margin-left:6px">Link to this plan</button>`
+      : '');
     const box = $('#dResult');
     renderRouteResult(box, view, {
       showDriverFields: true,
@@ -522,6 +535,18 @@ async function renderDispatchPlanner() {
       } : null,
       onClose: () => { if (box._map) { box._map.remove(); box._map = null; } box.innerHTML = ''; state.dispatchOpenPlan = null; },
     });
+    // delegated: the plan view re-renders when switching vehicle tabs
+    box.onclick = async (e) => {
+      const linkBtn = e.target.closest && e.target.closest('#dspLinkOrders');
+      if (!linkBtn) return;
+      linkBtn.disabled = true;
+      try {
+        const r = await api(`/dispatch/plans/${p.id}/link-orders`, { method: 'POST', body: JSON.stringify({ order_ids: pending.flatMap((x) => x.order_ids) }) });
+        flashToast(`${r.linked} order(s) linked to ${p.plan_no}`);
+        state.dispatchOpenPlan = p.id;
+        refreshMain();
+      } catch (err) { alert(err.message); linkBtn.disabled = false; }
+    };
     box.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
   $('#dPlans').addEventListener('click', (e) => {
