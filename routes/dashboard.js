@@ -148,31 +148,98 @@ router.get('/performance', async (req, res) => {
   });
 });
 
-// Distributor (primary) orders — the stock MIJO sells and dispatches to distributors.
-// Window is by order date; "dispatched" counts orders that have left the factory (dispatched or delivered).
-router.get('/primary', async (req, res) => {
-  const days = Math.max(1, Math.min(365, Number(req.query.days) || 30));
-  const to = /^\d{4}-\d{2}-\d{2}$/.test(req.query.to || '') ? req.query.to : new Date().toISOString().slice(0, 10);
-  const fromStr = new Date(new Date(`${to}T00:00:00Z`).getTime() - (days - 1) * 86400000).toISOString().slice(0, 10);
+// Distributor (primary) sales dashboard — the stock MIJO sells and dispatches to distributors.
+// Ordered figures go by order date; dispatched figures go by the dispatch plan date (when the stock left).
+const ISO = /^\d{4}-\d{2}-\d{2}$/;
+router.get('/distributor', async (req, res) => {
+  const today = new Date().toISOString().slice(0, 10);
+  const to = ISO.test(req.query.to || '') ? req.query.to : today;
+  const from = ISO.test(req.query.from || '') ? req.query.from : to;
+  if (from > to) return res.status(400).json({ error: 'From date is after To date' });
+  if ((new Date(to) - new Date(from)) / 86400000 > 366) return res.status(400).json({ error: 'Pick a range of one year or less' });
   const a = f(req, 'o.distributor_id');
+  const LIVE = "o.status NOT IN ('cancelled','rejected')";
+  const SHIPPED = "o.status IN ('dispatched','delivered')";
 
   const [byStatus] = await pool.query(
     `SELECT o.status, COUNT(*) AS cnt, COALESCE(SUM(o.total_cartons),0) AS cartons, COALESCE(SUM(o.total_amount),0) AS value
-     FROM distributor_orders o WHERE o.order_date BETWEEN ? AND ?${a.sql}
-     GROUP BY o.status`,
-    [fromStr, to, ...a.p]
-  );
+     FROM distributor_orders o WHERE o.order_date BETWEEN ? AND ?${a.sql} GROUP BY o.status`,
+    [from, to, ...a.p]);
+
+  const [[dispatched]] = await pool.query(
+    `SELECT COUNT(*) AS cnt, COALESCE(SUM(o.total_cartons),0) AS cartons, COALESCE(SUM(o.total_amount),0) AS value
+     FROM distributor_orders o JOIN dispatch_plans p ON p.id = o.dispatch_plan_id
+     WHERE ${SHIPPED} AND p.plan_date BETWEEN ? AND ?${a.sql}`,
+    [from, to, ...a.p]);
+
+  // Open pipeline right now, whatever the order date
+  const [[pipeline]] = await pool.query(
+    `SELECT SUM(o.status = 'submitted') AS awaiting_approval,
+            COALESCE(SUM(CASE WHEN o.status = 'submitted' THEN o.total_amount END),0) AS awaiting_value,
+            SUM(o.status IN ('approved','dispatch_planned')) AS to_dispatch,
+            COALESCE(SUM(CASE WHEN o.status IN ('approved','dispatch_planned') THEN o.total_cartons END),0) AS to_dispatch_cartons,
+            COALESCE(SUM(CASE WHEN o.status IN ('approved','dispatch_planned') THEN o.total_amount END),0) AS to_dispatch_value
+     FROM distributor_orders o WHERE 1=1${a.sql}`,
+    [...a.p]);
+
+  const [orderedDaily] = await pool.query(
+    `SELECT DATE_FORMAT(o.order_date, '%Y-%m-%d') AS d, COALESCE(SUM(o.total_amount),0) AS value
+     FROM distributor_orders o WHERE ${LIVE} AND o.order_date BETWEEN ? AND ?${a.sql} GROUP BY o.order_date`,
+    [from, to, ...a.p]);
+  const [dispatchedDaily] = await pool.query(
+    `SELECT DATE_FORMAT(p.plan_date, '%Y-%m-%d') AS d, COALESCE(SUM(o.total_amount),0) AS value
+     FROM distributor_orders o JOIN dispatch_plans p ON p.id = o.dispatch_plan_id
+     WHERE ${SHIPPED} AND p.plan_date BETWEEN ? AND ?${a.sql} GROUP BY p.plan_date`,
+    [from, to, ...a.p]);
+
+  const dArea = f(req, 'd.id');
   const [byDistributor] = await pool.query(
-    `SELECT d.id, d.name, d.code, COUNT(o.id) AS order_count,
-            COALESCE(SUM(o.total_cartons),0) AS cartons, COALESCE(SUM(o.total_amount),0) AS order_value,
-            COALESCE(SUM(CASE WHEN o.status IN ('dispatched','delivered') THEN o.total_cartons END),0) AS dispatched_cartons,
-            COALESCE(SUM(CASE WHEN o.status IN ('dispatched','delivered') THEN o.total_amount END),0) AS dispatched_value
-     FROM distributor_orders o JOIN distributors d ON d.id = o.distributor_id
-     WHERE o.order_date BETWEEN ? AND ? AND o.status NOT IN ('cancelled','rejected')${a.sql}
-     GROUP BY d.id ORDER BY order_value DESC`,
-    [fromStr, to, ...a.p]
-  );
-  res.json({ from: fromStr, to, days, byStatus, byDistributor });
+    `SELECT d.id, d.name, d.code, t.name AS territory_name,
+            COUNT(o.id) AS order_count,
+            COALESCE(SUM(o.total_cartons),0) AS cartons,
+            COALESCE(SUM(o.total_amount),0) AS order_value,
+            COALESCE(SUM(CASE WHEN ${SHIPPED} THEN o.total_amount END),0) AS dispatched_value,
+            COALESCE(SUM(CASE WHEN o.status IN ('submitted','approved','dispatch_planned') THEN o.total_amount END),0) AS pending_value,
+            (SELECT DATE_FORMAT(MAX(x.order_date), '%Y-%m-%d') FROM distributor_orders x
+              WHERE x.distributor_id = d.id AND x.status NOT IN ('cancelled','rejected')) AS last_order_date
+     FROM distributors d
+     LEFT JOIN territories t ON t.id = d.territory_id
+     LEFT JOIN distributor_orders o ON o.distributor_id = d.id AND ${LIVE} AND o.order_date BETWEEN ? AND ?
+     WHERE d.status = 'active'${dArea.sql}
+     GROUP BY d.id ORDER BY order_value DESC, d.name`,
+    [from, to, ...dArea.p]);
+
+  const [byBooker] = await pool.query(
+    `SELECT COALESCE(e.name, u.name, 'Unknown') AS name, e.designation, COUNT(o.id) AS order_count,
+            COALESCE(SUM(o.total_cartons),0) AS cartons, COALESCE(SUM(o.total_amount),0) AS order_value
+     FROM distributor_orders o
+     LEFT JOIN employees e ON e.id = o.booked_by_employee
+     LEFT JOIN users u ON u.id = o.booked_by_user
+     WHERE ${LIVE} AND o.order_date BETWEEN ? AND ?${a.sql}
+     GROUP BY COALESCE(e.name, u.name, 'Unknown'), e.designation ORDER BY order_value DESC LIMIT 20`,
+    [from, to, ...a.p]);
+
+  const [topSkus] = await pool.query(
+    `SELECT p.name, p.sku_code, SUM(l.qty) AS packs, SUM(l.qty / GREATEST(p.units_per_carton, 1)) AS cartons,
+            SUM(l.net_amount) AS value
+     FROM distributor_order_lines l
+     JOIN distributor_orders o ON o.id = l.order_id
+     JOIN products p ON p.id = l.product_id
+     WHERE ${LIVE} AND o.order_date BETWEEN ? AND ?${a.sql}
+     GROUP BY p.id ORDER BY value DESC LIMIT 15`,
+    [from, to, ...a.p]);
+
+  const [byTerritory] = await pool.query(
+    `SELECT COALESCE(t.name, 'No territory') AS name, COUNT(o.id) AS order_count,
+            COALESCE(SUM(o.total_cartons),0) AS cartons, COALESCE(SUM(o.total_amount),0) AS order_value
+     FROM distributor_orders o
+     JOIN distributors d ON d.id = o.distributor_id
+     LEFT JOIN territories t ON t.id = d.territory_id
+     WHERE ${LIVE} AND o.order_date BETWEEN ? AND ?${a.sql}
+     GROUP BY t.id, t.name ORDER BY order_value DESC`,
+    [from, to, ...a.p]);
+
+  res.json({ from, to, byStatus, dispatched, pipeline, orderedDaily, dispatchedDaily, byDistributor, byBooker, topSkus, byTerritory });
 });
 
 module.exports = router;

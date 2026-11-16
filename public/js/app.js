@@ -872,7 +872,24 @@ async function renderDeliveries() {
 }
 
 // ---------- Management: Dashboard ----------
+// Two views: Retail Sales (secondary — retailer orders booked by the field team) and
+// Distributor Sales (primary — stock MIJO sells and dispatches to distributors).
 async function renderDashboard() {
+  const view = state.dashView === 'distributor' ? 'distributor' : 'retail';
+  const body = view === 'distributor' ? await renderDistributorDashboard() : await renderRetailDashboard();
+  const node = el(`<div>
+    <div class="dash-switch">
+      <button data-dv="retail" class="${view === 'retail' ? 'active' : ''}">Retail Sales</button>
+      <button data-dv="distributor" class="${view === 'distributor' ? 'active' : ''}">Distributor Sales</button>
+    </div></div>`);
+  node.querySelectorAll('[data-dv]').forEach((b) => {
+    b.onclick = () => { if (state.dashView !== b.dataset.dv) { state.dashView = b.dataset.dv; render(); } };
+  });
+  node.appendChild(body);
+  return node;
+}
+
+async function renderRetailDashboard() {
   const date = todayISO();
   const d = await api(`/dashboard/summary?date=${date}`);
   const wrap = el(`
@@ -882,19 +899,6 @@ async function renderDashboard() {
         <div class="card kpi"><div class="value">${fmtMoney(d.orderStats.order_value)}</div><div class="label">Retailer Order Value Today</div></div>
         <div class="card kpi"><div class="value">${esc(d.retailerStats.new_today)}</div><div class="label">New Retailers Today</div></div>
         <div class="card kpi"><div class="value">${d.visitStats.total_visits || 0}</div><div class="label">Field Visits Today</div></div>
-      </div>
-      <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-          <p class="section-title" style="margin:0">Distributor Orders (Primary) — <span id="primRangeLabel"></span></p>
-          <select id="primDays" style="width:auto">
-            <option value="7">Last 7 days</option>
-            <option value="30" selected>Last 30 days</option>
-            <option value="90">Last 90 days</option>
-          </select>
-        </div>
-        <div id="primKpis" class="grid cols-4" style="margin-top:10px"></div>
-        <div class="chart-box" style="height:220px"><canvas id="chartPrimary"></canvas></div>
-        <div id="primTable"></div>
       </div>
       <div class="grid cols-2">
         <div class="card">
@@ -1018,27 +1022,8 @@ async function renderDashboard() {
     `;
   }
 
-  async function loadPrimary(days) {
-    const p = await api(`/dashboard/primary?days=${days}&to=${date}`);
-    wrap.querySelector('#primRangeLabel').textContent = `${p.from} to ${p.to}`;
-    const st = Object.fromEntries(p.byStatus.map((r) => [r.status, r]));
-    const sum = (keys, k) => keys.reduce((a, x) => a + Number((st[x] || {})[k] || 0), 0);
-    const kpi = (v, l) => `<div class="kpi"><div class="value">${v}</div><div class="label">${l}</div></div>`;
-    wrap.querySelector('#primKpis').innerHTML =
-      kpi(fmtMoney(sum(['submitted', 'approved', 'dispatch_planned', 'dispatched', 'delivered'], 'value')), 'Ordered') +
-      kpi(sum(['submitted'], 'cnt'), 'Awaiting approval') +
-      kpi(sum(['approved', 'dispatch_planned'], 'cnt'), 'Approved, not yet dispatched') +
-      kpi(`${fmtMoney(sum(['dispatched', 'delivered'], 'value'))}<br/><span style="font-size:13px">${sum(['dispatched', 'delivered'], 'cnt')} orders</span>`, 'Dispatched');
-    wrap.querySelector('#primTable').innerHTML = p.byDistributor.length
-      ? `<table><thead><tr><th>Distributor</th><th>Orders</th><th>Cartons</th><th>Ordered</th><th>Dispatched cartons</th><th>Dispatched value</th></tr></thead>
-         <tbody>${p.byDistributor.map((r) => `<tr><td>${esc(r.name)} (${esc(r.code)})</td><td>${esc(r.order_count)}</td><td>${esc(Math.round(r.cartons * 10) / 10)}</td><td>${fmtMoney(r.order_value)}</td><td>${esc(Math.round(r.dispatched_cartons * 10) / 10)}</td><td>${fmtMoney(r.dispatched_value)}</td></tr>`).join('')}</tbody></table>`
-      : '<p class="muted">No distributor orders in this period.</p>';
-    drawBarChart(wrap.querySelector('#chartPrimary'), p.byDistributor.map((r) => r.name), p.byDistributor.map((r) => Number(r.dispatched_value)), { label: 'Dispatched value', tooltipFormatter: fmtMoney, colorful: true });
-  }
-
-  wrap.querySelector('#primDays').onchange = (e) => loadPrimary(e.target.value).catch((err) => alert(err.message));
   wrap.querySelector('#perfDays').onchange = (e) => loadPerformance(e.target.value);
-  setTimeout(() => { drawTodayCharts(); loadPrimary(30).catch(() => {}); loadPerformance(30); }, 0);
+  setTimeout(() => { drawTodayCharts(); loadPerformance(30); }, 0);
 
   return wrap;
 }
