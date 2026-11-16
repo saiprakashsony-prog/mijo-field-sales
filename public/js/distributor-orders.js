@@ -52,7 +52,7 @@ async function renderDistributorOrders() {
         <p class="section-title" style="margin:0">${u.role === 'distributor' ? 'My Stock Orders' : 'Distributor Orders'}</p>
         <select id="doStatusFilter" style="width:auto">
           <option value="">All statuses</option>
-          ${Object.entries(DO_STATUS_LABEL).map(([k, v]) => `<option value="${k}" ${isAdminUser && k === 'submitted' ? 'selected' : ''}>${v}</option>`).join('')}
+          ${Object.entries(DO_STATUS_LABEL).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}
         </select>
       </div>
       <div id="doList"></div>
