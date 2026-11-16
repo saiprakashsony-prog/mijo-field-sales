@@ -28,7 +28,8 @@ function el(html) {
 }
 function fmtMoney(n) { return '₹' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 }); }
 function fmtDate(d) { return d ? new Date(d).toLocaleString('en-IN') : ''; }
-function todayISO() { return new Date().toISOString().slice(0, 10); }
+// Local (IST) date — toISOString() alone is UTC, which is still yesterday before 5:30 AM IST
+function todayISO() { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); }
 
 // Escapes text before it goes into an HTML template. Every value the API returns that a person
 // typed (names, addresses, reasons, notes...) must pass through this, or it can run as code in
@@ -877,20 +878,33 @@ async function renderDashboard() {
   const wrap = el(`
     <div>
       <div class="grid cols-4">
-        <div class="card kpi"><div class="value">${esc(d.orderStats.order_count)}</div><div class="label">Today's Orders</div></div>
-        <div class="card kpi"><div class="value">${fmtMoney(d.orderStats.order_value)}</div><div class="label">Order Value</div></div>
+        <div class="card kpi"><div class="value">${esc(d.orderStats.order_count)}</div><div class="label">Retailer Orders Today</div></div>
+        <div class="card kpi"><div class="value">${fmtMoney(d.orderStats.order_value)}</div><div class="label">Retailer Order Value Today</div></div>
         <div class="card kpi"><div class="value">${esc(d.retailerStats.new_today)}</div><div class="label">New Retailers Today</div></div>
         <div class="card kpi"><div class="value">${d.visitStats.total_visits || 0}</div><div class="label">Field Visits Today</div></div>
       </div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <p class="section-title" style="margin:0">Distributor Orders (Primary) — <span id="primRangeLabel"></span></p>
+          <select id="primDays" style="width:auto">
+            <option value="7">Last 7 days</option>
+            <option value="30" selected>Last 30 days</option>
+            <option value="90">Last 90 days</option>
+          </select>
+        </div>
+        <div id="primKpis" class="grid cols-4" style="margin-top:10px"></div>
+        <div class="chart-box" style="height:220px"><canvas id="chartPrimary"></canvas></div>
+        <div id="primTable"></div>
+      </div>
       <div class="grid cols-2">
         <div class="card">
-          <p class="section-title">Orders by Distributor</p>
+          <p class="section-title">Retailer Orders Today by Distributor</p>
           <div class="chart-box" style="height:180px"><canvas id="chartByDistributor"></canvas></div>
           <table><thead><tr><th>Distributor</th><th>Orders</th><th>Value</th></tr></thead>
           <tbody>${d.byDistributor.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.order_count)}</td><td>${fmtMoney(r.order_value)}</td></tr>`).join('')}</tbody></table>
         </div>
         <div class="card">
-          <p class="section-title">Orders by Sales Employee</p>
+          <p class="section-title">Retailer Orders Today by Sales Employee</p>
           <div class="chart-box" style="height:180px"><canvas id="chartByEmployee"></canvas></div>
           <table><thead><tr><th>Employee</th><th>Orders</th><th>Value</th></tr></thead>
           <tbody>${d.byEmployee.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.order_count)}</td><td>${fmtMoney(r.order_value)}</td></tr>`).join('')}</tbody></table>
@@ -904,7 +918,7 @@ async function renderDashboard() {
           <tbody>${d.topSkus.map((r) => `<tr><td>${esc(r.name)} (${esc(r.sku_code)})</td><td>${esc(r.qty)}</td><td>${fmtMoney(r.value)}</td></tr>`).join('')}</tbody></table>
         </div>
         <div class="card">
-          <p class="section-title">Orders by Status</p>
+          <p class="section-title">Retailer Orders Today by Status</p>
           <div class="chart-box" style="height:180px"><canvas id="chartByStatus"></canvas></div>
           <table><thead><tr><th>Status</th><th>Count</th><th>Value</th></tr></thead>
           <tbody>${d.byStatus.map((r) => `<tr><td><span class="badge ${esc(r.status)}">${r.status.replace(/_/g, ' ')}</span></td><td>${esc(r.cnt)}</td><td>${fmtMoney(r.value)}</td></tr>`).join('')}</tbody></table>
@@ -1004,8 +1018,27 @@ async function renderDashboard() {
     `;
   }
 
+  async function loadPrimary(days) {
+    const p = await api(`/dashboard/primary?days=${days}&to=${date}`);
+    wrap.querySelector('#primRangeLabel').textContent = `${p.from} to ${p.to}`;
+    const st = Object.fromEntries(p.byStatus.map((r) => [r.status, r]));
+    const sum = (keys, k) => keys.reduce((a, x) => a + Number((st[x] || {})[k] || 0), 0);
+    const kpi = (v, l) => `<div class="kpi"><div class="value">${v}</div><div class="label">${l}</div></div>`;
+    wrap.querySelector('#primKpis').innerHTML =
+      kpi(fmtMoney(sum(['submitted', 'approved', 'dispatch_planned', 'dispatched', 'delivered'], 'value')), 'Ordered') +
+      kpi(sum(['submitted'], 'cnt'), 'Awaiting approval') +
+      kpi(sum(['approved', 'dispatch_planned'], 'cnt'), 'Approved, not yet dispatched') +
+      kpi(`${fmtMoney(sum(['dispatched', 'delivered'], 'value'))}<br/><span style="font-size:13px">${sum(['dispatched', 'delivered'], 'cnt')} orders</span>`, 'Dispatched');
+    wrap.querySelector('#primTable').innerHTML = p.byDistributor.length
+      ? `<table><thead><tr><th>Distributor</th><th>Orders</th><th>Cartons</th><th>Ordered</th><th>Dispatched cartons</th><th>Dispatched value</th></tr></thead>
+         <tbody>${p.byDistributor.map((r) => `<tr><td>${esc(r.name)} (${esc(r.code)})</td><td>${esc(r.order_count)}</td><td>${esc(Math.round(r.cartons * 10) / 10)}</td><td>${fmtMoney(r.order_value)}</td><td>${esc(Math.round(r.dispatched_cartons * 10) / 10)}</td><td>${fmtMoney(r.dispatched_value)}</td></tr>`).join('')}</tbody></table>`
+      : '<p class="muted">No distributor orders in this period.</p>';
+    drawBarChart(wrap.querySelector('#chartPrimary'), p.byDistributor.map((r) => r.name), p.byDistributor.map((r) => Number(r.dispatched_value)), { label: 'Dispatched value', tooltipFormatter: fmtMoney, colorful: true });
+  }
+
+  wrap.querySelector('#primDays').onchange = (e) => loadPrimary(e.target.value).catch((err) => alert(err.message));
   wrap.querySelector('#perfDays').onchange = (e) => loadPerformance(e.target.value);
-  setTimeout(() => { drawTodayCharts(); loadPerformance(30); }, 0);
+  setTimeout(() => { drawTodayCharts(); loadPrimary(30).catch(() => {}); loadPerformance(30); }, 0);
 
   return wrap;
 }

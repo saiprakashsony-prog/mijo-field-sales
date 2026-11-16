@@ -148,4 +148,31 @@ router.get('/performance', async (req, res) => {
   });
 });
 
+// Distributor (primary) orders — the stock MIJO sells and dispatches to distributors.
+// Window is by order date; "dispatched" counts orders that have left the factory (dispatched or delivered).
+router.get('/primary', async (req, res) => {
+  const days = Math.max(1, Math.min(365, Number(req.query.days) || 30));
+  const to = /^\d{4}-\d{2}-\d{2}$/.test(req.query.to || '') ? req.query.to : new Date().toISOString().slice(0, 10);
+  const fromStr = new Date(new Date(`${to}T00:00:00Z`).getTime() - (days - 1) * 86400000).toISOString().slice(0, 10);
+  const a = f(req, 'o.distributor_id');
+
+  const [byStatus] = await pool.query(
+    `SELECT o.status, COUNT(*) AS cnt, COALESCE(SUM(o.total_cartons),0) AS cartons, COALESCE(SUM(o.total_amount),0) AS value
+     FROM distributor_orders o WHERE o.order_date BETWEEN ? AND ?${a.sql}
+     GROUP BY o.status`,
+    [fromStr, to, ...a.p]
+  );
+  const [byDistributor] = await pool.query(
+    `SELECT d.id, d.name, d.code, COUNT(o.id) AS order_count,
+            COALESCE(SUM(o.total_cartons),0) AS cartons, COALESCE(SUM(o.total_amount),0) AS order_value,
+            COALESCE(SUM(CASE WHEN o.status IN ('dispatched','delivered') THEN o.total_cartons END),0) AS dispatched_cartons,
+            COALESCE(SUM(CASE WHEN o.status IN ('dispatched','delivered') THEN o.total_amount END),0) AS dispatched_value
+     FROM distributor_orders o JOIN distributors d ON d.id = o.distributor_id
+     WHERE o.order_date BETWEEN ? AND ? AND o.status NOT IN ('cancelled','rejected')${a.sql}
+     GROUP BY d.id ORDER BY order_value DESC`,
+    [fromStr, to, ...a.p]
+  );
+  res.json({ from: fromStr, to, days, byStatus, byDistributor });
+});
+
 module.exports = router;
